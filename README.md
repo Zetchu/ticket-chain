@@ -1,5 +1,7 @@
 # CS414 Fundamentals of Blockchain: Localized P2P Event Ticketing Network
 
+[Live site](ticket-chain-ten.vercel.app)
+
 **Institution:** Harbour.Space University, Barcelona
 
 **Course:** CS414 Fundamentals of Blockchain
