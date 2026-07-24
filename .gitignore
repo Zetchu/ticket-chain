@@ -1,0 +1,49 @@
+# =========================
+# Operating System Files
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =========================
+# IDEs and Editors
+# =========================
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# =========================
+# Node / Frontend & Contracts
+# =========================
+node_modules/
+npm-debug.log
+yarn-error.log
+.env
+dist/
+build/
+
+# =========================
+# Hardhat (Smart Contracts)
+# =========================
+artifacts/
+cache/
+typechain/
+typechain-types/
+coverage/
+coverage.json
+
+# =========================
+# Python (PyIPv8 Network)
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+.pytest_cache/
