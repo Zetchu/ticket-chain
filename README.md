@@ -25,7 +25,7 @@ Our architecture is split into three distinct layers to ensure full decentraliza
 - **P2P Network Layer:** Built using PyIPv8 to handle communication between decentralized nodes.
 - **Consensus & Asset Management Layer:** Smart contracts deployed locally that define the rules for ticket minting, escrow, and the anti-scalping price ceiling (DeFi/NFT asset management).
 
-(Note: An architecture diagram mapping the flow from the React frontend to the web server and database/blockchain will be included here prior to submission.)
+The full architecture diagram mapping the flow between the React frontend, the Hardhat node, and the PyIPv8 network is available in [docs/architecture.md](docs/architecture.md).
 
 ## 3\. Algorithms & Data Structures
 
