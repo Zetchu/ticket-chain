@@ -1,0 +1,3 @@
+pyipv8==2.13.0
+# pyipv8 2.13 references EC curves removed from newer cryptography releases
+cryptography==43.0.3
