@@ -1,0 +1,18 @@
+{
+  "name": "ticketchain-contracts",
+  "version": "0.1.0",
+  "description": "Smart contracts for the TicketChain localized P2P event ticketing network (CS414 final project)",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "node": "hardhat node"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0"
+  }
+}
