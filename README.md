@@ -29,10 +29,19 @@ The full architecture diagram mapping the flow between the React frontend, the H
 
 ## 3\. Algorithms & Data Structures
 
-To ensure network security and efficient data propagation, our protocol implements two core mechanisms:
+The `network/blockchain/` package provides a hand-built blockchain core (no Ethereum dependency) with four interconnected components:
 
-- **Search Puzzle Sequence:** We utilize a cryptographic search puzzle algorithm to provide sybil resistance. This requires nodes to expend computational effort to participate in network broadcasting, preventing spam attacks.
-- **Localized Peer Community Broadcasting:** An optimized data structure and routing algorithm within PyIPv8 that allows nodes to quickly discover and synchronize ticket availability with other peers specifically within high-density event areas.
+- **Transactions (`transaction.py`):** Each ticket transfer is a `Transaction` object carrying sender/recipient public keys, ticket ID, sale price, and face value. Transactions are signed with ECDSA over SECP256K1 (the same curve used by Ethereum/Bitcoin) using the `cryptography` library. Validation enforces both signature correctness and the anti-scalping rule (`price ≤ face_value`) before a transaction enters the mempool.
+
+- **Merkle Tree (`merkle.py`):** Pending transactions are grouped into a block using a binary Merkle tree. Each leaf is a SHA-256 transaction hash; internal nodes are SHA-256 hashes of concatenated child hashes (with duplicate-last-node handling for odd counts). The Merkle root stored in the block header allows anyone to verify that a specific transaction is included in a block using a logarithmic-size inclusion proof (`get_proof` / `verify_proof`), without downloading all transactions.
+
+- **Blocks & Chain (`block.py`, `chain.py`):** A `Block` contains a header (`index`, `prev_hash`, `merkle_root`, `timestamp`, `difficulty`, `nonce`) and a list of transactions. The block hash is SHA-256 of the serialized header. Blocks are linked by storing the previous block's hash, forming a tamper-evident chain. The `Blockchain` class manages a pending-transaction mempool and enforces full chain validation (PoW, prev-hash linkage, Merkle root consistency, all signatures) on every block.
+
+- **Proof-of-Work (`pow.py`):** Mining uses a leading-zero-bits difficulty target. The miner increments the block header nonce until the SHA-256 block hash has at least `difficulty` leading zero bits (default: 16 bits, verifiable as the first four hex characters being `0000`). This constitutes the cryptographic search puzzle providing Sybil resistance — nodes must expend computational effort to propose blocks.
+
+- **P2P Broadcast (`main.py`):** The `TicketChainCommunity` IPv8 overlay broadcasts signed transactions (`TransactionPayload`) and mined blocks (`BlockPayload`) to all discovered peers using UDP. Receiving peers validate before accepting, ensuring no invalid transactions or blocks propagate through the network.
+
+- **Localized Peer Discovery:** IPv8's UDP broadcast bootstrapper limits peer discovery to the local network segment, keeping the overlay localized to high-density event areas without relying on public trackers.
 
 ## 4\. Process & Quality Assurance (QA)
 
