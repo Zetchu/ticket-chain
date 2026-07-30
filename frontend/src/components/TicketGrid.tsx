@@ -1,34 +1,30 @@
-import { Typography, Box, Grid } from '@mui/material';
+// src/components/TicketGrid.tsx
+import { Typography, Box, Grid, CircularProgress, Alert } from '@mui/material';
+import { useQuery } from '@tanstack/react-query';
 import TicketCard from './TicketCard';
 
-const MOCK_TICKETS = [
-  {
-    id: 1,
-    title: 'Sónar Festival 2026',
-    date: 'June 2026',
-    location: 'Fira Montjuïc, Barcelona',
-    price: '150 USDC',
-    type: '3-Day Pass',
-  },
-  {
-    id: 2,
-    title: 'Mobile World Congress',
-    date: 'March 2026',
-    location: 'Fira Gran Via, Barcelona',
-    price: '850 USDC',
-    type: 'Standard Entry',
-  },
-  {
-    id: 3,
-    title: 'Talent Arena',
-    date: 'March 2026',
-    location: 'Fira Montjuïc, Barcelona',
-    price: 'Face Value',
-    type: 'Developer Pass',
-  },
-];
+// Fetch function targeting the PyIPv8 local server
+const fetchP2PTickets = async () => {
+  const response = await fetch('http://127.0.0.1:8080/tickets');
+  if (!response.ok) {
+    throw new Error('Network response was not ok');
+  }
+  return response.json();
+};
 
 export default function TicketGrid({ isConnected }: { isConnected: boolean }) {
+  // React Query hook to manage the data fetching and caching
+  const {
+    data: tickets,
+    isPending,
+    isError,
+    error,
+  } = useQuery({
+    queryKey: ['p2pTickets'],
+    queryFn: fetchP2PTickets,
+    retry: 2, // Retries in case the Python node is still booting up
+  });
+
   return (
     <Box sx={{ mt: 4, mb: 8 }}>
       <Typography
@@ -38,22 +34,39 @@ export default function TicketGrid({ isConnected }: { isConnected: boolean }) {
       >
         Available Events
       </Typography>
-      <Grid
-        container
-        spacing={3}
-      >
-        {MOCK_TICKETS.map((ticket) => (
-          <Grid
-            key={ticket.id}
-            size={{ xs: 12, sm: 6, md: 4 }}
-          >
-            <TicketCard
-              ticket={ticket}
-              isConnected={isConnected}
-            />
-          </Grid>
-        ))}
-      </Grid>
+
+      {/* Render loading, error, or the live data grid */}
+      {isPending ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : isError ? (
+        <Alert severity='error'>
+          Failed to fetch P2P tickets. Ensure the PyIPv8 node is running on port
+          8080. ({error.message})
+        </Alert>
+      ) : tickets && tickets.length > 0 ? (
+        <Grid
+          container
+          spacing={3}
+        >
+          {tickets.map((ticket: any) => (
+            <Grid
+              key={ticket.id}
+              size={{ xs: 12, sm: 6, md: 4 }}
+            >
+              <TicketCard
+                ticket={ticket}
+                isConnected={isConnected}
+              />
+            </Grid>
+          ))}
+        </Grid>
+      ) : (
+        <Typography color='text.secondary'>
+          No local tickets discovered on the P2P network.
+        </Typography>
+      )}
     </Box>
   );
 }

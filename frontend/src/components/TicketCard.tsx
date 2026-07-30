@@ -1,3 +1,4 @@
+// src/components/TicketCard.tsx
 import {
   Card,
   CardContent,
@@ -6,12 +7,26 @@ import {
   Box,
   Chip,
   CircularProgress,
+  Alert,
+  Snackbar,
 } from '@mui/material';
-// import { useReadContract } from 'wagmi';
+import {
+  useWriteContract,
+  useWaitForTransactionReceipt,
+  useReadContract,
+} from 'wagmi';
+import { useState } from 'react';
+// import { parseEther } from 'viem'; // Uncomment if the price needs conversion to wei
 
-/* 
-// Mock ABI for reading ticket data 
-const mockAbi = [
+// The ABI provided by your Smart Contract Lead (Issue 1)
+const ticketABI = [
+  {
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    name: 'resaleTransfer',
+    outputs: [],
+    stateMutability: 'payable',
+    type: 'function',
+  },
   {
     inputs: [{ name: 'ticketId', type: 'uint256' }],
     name: 'getTicketDetails',
@@ -20,7 +35,6 @@ const mockAbi = [
     type: 'function',
   },
 ] as const;
-*/
 
 export default function TicketCard({
   ticket,
@@ -29,19 +43,44 @@ export default function TicketCard({
   ticket: any;
   isConnected: boolean;
 }) {
-  // --- TEMPORARILY DISABLED WAGMI HOOK (Waiting for local Hardhat node) ---
-  /*
-  const { data, isPending, error } = useReadContract({
-    address: '0x0000000000000000000000000000000000000000', 
-    abi: mockAbi,
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
+
+  // 1. Read the live price from the contract
+  const {
+    data: onChainPrice,
+    isPending: isReadPending,
+    error: readError,
+  } = useReadContract({
+    address: '0x5FbDB2315678afecb367f032d93F642f64180aa3', // Replace with the actual deployed address
+    abi: ticketABI,
     functionName: 'getTicketDetails',
     args: [BigInt(ticket.id)],
   });
-  */
 
-  // Forced Mock State for UI Development
-  const isPending = false;
-  const error = null;
+  // 2. Setup the write hook for the purchase transaction
+  const {
+    data: hash,
+    isPending: isWritePending,
+    writeContract,
+    error: writeError,
+  } = useWriteContract();
+
+  // 3. Wait for the transaction to be confirmed on the blockchain
+  const { isLoading: isConfirming, isSuccess: isConfirmed } =
+    useWaitForTransactionReceipt({
+      hash,
+    });
+
+  const handlePurchase = () => {
+    setSnackbarOpen(true);
+    writeContract({
+      address: '0xYourContractAddressHere', // Replace with the actual deployed address
+      abi: ticketABI,
+      functionName: 'resaleTransfer',
+      args: [BigInt(ticket.id)],
+      // value: parseEther(ticket.price.replace(/[^0-9.]/g, '')), // Send the required payment
+    });
+  };
 
   return (
     <Card sx={{ bgcolor: '#1e293b', color: 'white', borderRadius: 2 }}>
@@ -57,10 +96,10 @@ export default function TicketCard({
             }}
           />
 
-          {/* Handle loading/error states from the contract read */}
-          {isPending ? (
+          {/* Display live contract data or loading states */}
+          {isReadPending ? (
             <CircularProgress size={20} />
-          ) : error ? (
+          ) : readError ? (
             <Typography
               color='error'
               variant='body2'
@@ -69,7 +108,7 @@ export default function TicketCard({
             </Typography>
           ) : (
             <Typography sx={{ color: '#10b981', fontWeight: 700 }}>
-              {ticket.price}
+              {onChainPrice ? onChainPrice.toString() : ticket.price}
             </Typography>
           )}
         </Box>
@@ -93,15 +132,50 @@ export default function TicketCard({
           📅 {ticket.date}
         </Typography>
 
+        {/* Dynamic button state based on the transaction lifecycle */}
         <Button
           variant='contained'
           fullWidth
-          disabled={!isConnected}
+          onClick={handlePurchase}
+          disabled={!isConnected || isWritePending || isConfirming}
           sx={{ bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' } }}
         >
-          {isConnected ? 'Purchase Ticket' : 'Connect to Buy'}
+          {isWritePending
+            ? 'Confirm in Wallet...'
+            : isConfirming
+              ? 'Waiting for Block...'
+              : isConfirmed
+                ? 'Purchased!'
+                : isConnected
+                  ? 'Purchase Ticket'
+                  : 'Connect to Buy'}
         </Button>
       </CardContent>
+
+      {/* MUI Snackbar for transaction feedback */}
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={6000}
+        onClose={() => setSnackbarOpen(false)}
+      >
+        {writeError ? (
+          <Alert
+            severity='error'
+            onClose={() => setSnackbarOpen(false)}
+          >
+            Transaction Failed: {writeError.message.slice(0, 50)}...
+          </Alert>
+        ) : isConfirmed ? (
+          <Alert
+            severity='success'
+            onClose={() => setSnackbarOpen(false)}
+          >
+            Transaction Confirmed! View Hash: {hash?.slice(0, 6)}...
+          </Alert>
+        ) : (
+          <Alert severity='info'>Transaction pending...</Alert>
+        )}
+      </Snackbar>
     </Card>
   );
 }
