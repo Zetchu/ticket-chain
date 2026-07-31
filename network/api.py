@@ -31,13 +31,25 @@ ALLOWED_ORIGINS = [
 ]
 
 
-def _tx_to_ticket(tx: Transaction, ticket_number: int, status: str) -> dict:
-    """Map a blockchain Transaction to the frontend ticket schema."""
+def _tx_to_ticket(tx: Transaction, status: str) -> dict | None:
+    """Map a blockchain Transaction to the frontend ticket schema.
+
+    ``id`` is the ERC-721 token ID of the ticket on the Ethereum side —
+    Transaction.ticket_id holds it as a string. The frontend calls
+    getTicketDetails(id) and resaleTransfer(id) with it, so a transaction
+    whose ticket_id is not a token ID has no on-chain counterpart to show
+    and is skipped (returns None) rather than rendering a broken card.
+    """
+    try:
+        token_id = int(tx.ticket_id)
+    except (TypeError, ValueError):
+        return None
+
     return {
-        "id": ticket_number,
+        "id": token_id,
         "type": status,
         "price": str(tx.price),
-        "title": tx.ticket_id,
+        "title": f"Ticket #{token_id}",
         "location": "Local P2P Network",
         "date": datetime.fromtimestamp(tx.timestamp, tz=timezone.utc).strftime(
             "%Y-%m-%d %H:%M"
@@ -74,18 +86,19 @@ def create_app(blockchain: Blockchain) -> FastAPI:
         and pending mempool transactions (type "Pending").
         """
         tickets: list[dict] = []
-        ticket_number = 1
 
         # Confirmed transactions from mined blocks (skip genesis, no txs)
         for block in blockchain.chain:
             for tx in block.transactions:
-                tickets.append(_tx_to_ticket(tx, ticket_number, "Confirmed"))
-                ticket_number += 1
+                ticket = _tx_to_ticket(tx, "Confirmed")
+                if ticket is not None:
+                    tickets.append(ticket)
 
         # Pending transactions from the mempool
         for tx in blockchain.mempool:
-            tickets.append(_tx_to_ticket(tx, ticket_number, "Pending"))
-            ticket_number += 1
+            ticket = _tx_to_ticket(tx, "Pending")
+            if ticket is not None:
+                tickets.append(ticket)
 
         return tickets
 

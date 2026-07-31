@@ -16,48 +16,50 @@ import {
   useReadContract,
 } from 'wagmi';
 import { useState } from 'react';
-// import { parseEther } from 'viem'; // Uncomment if the price needs conversion to wei
+import { formatEther, type Abi } from 'viem';
+import TicketNFTData from '../contracts/TicketNFT.json'; // Written by scripts/deploy.js
 
-// The ABI provided by your Smart Contract Lead (Issue 1)
-const ticketABI = [
-  {
-    inputs: [{ name: 'tokenId', type: 'uint256' }],
-    name: 'resaleTransfer',
-    outputs: [],
-    stateMutability: 'payable',
-    type: 'function',
-  },
-  {
-    inputs: [{ name: 'ticketId', type: 'uint256' }],
-    name: 'getTicketDetails',
-    outputs: [{ name: 'price', type: 'uint256' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-] as const;
+// Importing JSON widens these to `string` / `unknown[]`, but wagmi wants a
+// 0x-prefixed address and an Abi, so restate the types here.
+const contractAddress = TicketNFTData.address as `0x${string}`;
+const ticketAbi = TicketNFTData.abi as Abi;
+
+/** A ticket offering from the P2P node — see network/api.py `_tx_to_ticket`. */
+export interface Ticket {
+  /** On-chain ERC-721 token ID; what the contract calls below are keyed on. */
+  id: number;
+  type: string;
+  price: string;
+  title: string;
+  location: string;
+  date: string;
+}
 
 export default function TicketCard({
   ticket,
   isConnected,
 }: {
-  ticket: any;
+  ticket: Ticket;
   isConnected: boolean;
 }) {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
 
-  // 1. Read the live price from the contract
+  // Read the live price from the contract
   const {
     data: onChainPrice,
     isPending: isReadPending,
     error: readError,
   } = useReadContract({
-    address: '0x5FbDB2315678afecb367f032d93F642f64180aa3', // Replace with the actual deployed address
-    abi: ticketABI,
+    address: contractAddress,
+    abi: ticketAbi,
     functionName: 'getTicketDetails',
     args: [BigInt(ticket.id)],
   });
 
-  // 2. Setup the write hook for the purchase transaction
+  // A non-const ABI gives back `unknown`; getTicketDetails returns uint256.
+  const price = onChainPrice as bigint | undefined;
+
+  // Setup the write hook for the purchase transaction
   const {
     data: hash,
     isPending: isWritePending,
@@ -65,20 +67,22 @@ export default function TicketCard({
     error: writeError,
   } = useWriteContract();
 
-  // 3. Wait for the transaction to be confirmed on the blockchain
+  // Wait for the transaction to be confirmed on the blockchain
   const { isLoading: isConfirming, isSuccess: isConfirmed } =
     useWaitForTransactionReceipt({
       hash,
     });
 
   const handlePurchase = () => {
+    if (price === undefined) return; // Price unknown — nothing safe to send
     setSnackbarOpen(true);
     writeContract({
-      address: '0xYourContractAddressHere', // Replace with the actual deployed address
-      abi: ticketABI,
+      address: contractAddress,
+      abi: ticketAbi,
       functionName: 'resaleTransfer',
       args: [BigInt(ticket.id)],
-      // value: parseEther(ticket.price.replace(/[^0-9.]/g, '')), // Send the required payment
+      // resaleTransfer is payable and requires exactly the face value.
+      value: price,
     });
   };
 
@@ -96,7 +100,6 @@ export default function TicketCard({
             }}
           />
 
-          {/* Display live contract data or loading states */}
           {isReadPending ? (
             <CircularProgress size={20} />
           ) : readError ? (
@@ -108,7 +111,9 @@ export default function TicketCard({
             </Typography>
           ) : (
             <Typography sx={{ color: '#10b981', fontWeight: 700 }}>
-              {onChainPrice ? onChainPrice.toString() : ticket.price}
+              {price !== undefined
+                ? `${formatEther(price)} ETH`
+                : ticket.price}
             </Typography>
           )}
         </Box>
@@ -132,12 +137,16 @@ export default function TicketCard({
           📅 {ticket.date}
         </Typography>
 
-        {/* Dynamic button state based on the transaction lifecycle */}
         <Button
           variant='contained'
           fullWidth
           onClick={handlePurchase}
-          disabled={!isConnected || isWritePending || isConfirming}
+          disabled={
+            !isConnected ||
+            price === undefined ||
+            isWritePending ||
+            isConfirming
+          }
           sx={{ bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' } }}
         >
           {isWritePending
@@ -152,7 +161,6 @@ export default function TicketCard({
         </Button>
       </CardContent>
 
-      {/* MUI Snackbar for transaction feedback */}
       <Snackbar
         open={snackbarOpen}
         autoHideDuration={6000}

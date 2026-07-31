@@ -38,6 +38,12 @@ coverage/
 coverage.json
 
 # =========================
+# Local dev run logs (start_dev.sh)
+# =========================
+hardhat.log
+network.log
+
+# =========================
 # Python (PyIPv8 Network)
 # =========================
 __pycache__/

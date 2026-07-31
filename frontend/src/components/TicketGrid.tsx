@@ -1,10 +1,10 @@
 // src/components/TicketGrid.tsx
 import { Typography, Box, Grid, CircularProgress, Alert } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
-import TicketCard from './TicketCard';
+import TicketCard, { type Ticket } from './TicketCard';
 
-// Fetch function targeting the PyIPv8 local server
-const fetchP2PTickets = async () => {
+// Fetch function targeting the live PyIPv8 local server
+const fetchP2PTickets = async (): Promise<Ticket[]> => {
   const response = await fetch('http://127.0.0.1:8080/tickets');
   if (!response.ok) {
     throw new Error('Network response was not ok');
@@ -50,9 +50,11 @@ export default function TicketGrid({ isConnected }: { isConnected: boolean }) {
           container
           spacing={3}
         >
-          {tickets.map((ticket: any) => (
+          {tickets.map((ticket) => (
             <Grid
-              key={ticket.id}
+              // A token can appear both mined and pending, so the status is
+              // part of the key.
+              key={`${ticket.type}-${ticket.id}`}
               size={{ xs: 12, sm: 6, md: 4 }}
             >
               <TicketCard
