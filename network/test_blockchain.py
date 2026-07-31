@@ -365,26 +365,31 @@ class TestSearchPuzzle:
 
 class TestAPI:
 
+    @staticmethod
+    def _offering(token_id: str) -> Transaction:
+        """A signed ticket offering for on-chain token *token_id*."""
+        priv, pub = generate_keypair()
+        _, pub2 = generate_keypair()
+        tx = Transaction(
+            sender=pub, recipient=pub2,
+            ticket_id=token_id, price=10, face_value=20,
+        )
+        tx.sign(priv)
+        return tx
+
     @pytest.fixture
-    def client(self, blockchain, signed_tx):
+    def client(self, blockchain):
         """A FastAPI TestClient bound to a blockchain with 1 mined tx and
-        1 pending tx."""
+        1 pending tx. ticket_id carries the ERC-721 token ID of the ticket."""
         from fastapi.testclient import TestClient
         from api import create_app
 
         # 1 confirmed transaction (mined into block #1)
-        blockchain.add_transaction(signed_tx)
+        blockchain.add_transaction(self._offering("0"))
         blockchain.mine_pending()
 
         # 1 pending transaction (left in mempool)
-        priv, pub = generate_keypair()
-        _, pub2 = generate_keypair()
-        pending = Transaction(
-            sender=pub, recipient=pub2,
-            ticket_id="TICKET-PENDING", price=10, face_value=20,
-        )
-        pending.sign(priv)
-        blockchain.add_transaction(pending)
+        blockchain.add_transaction(self._offering("7"))
 
         return TestClient(create_app(blockchain))
 
@@ -413,7 +418,24 @@ class TestAPI:
     def test_get_tickets_pending_title(self, client):
         tickets = client.get("/tickets").json()
         pending = [t for t in tickets if t["type"] == "Pending"]
-        assert pending[0]["title"] == "TICKET-PENDING"
+        assert pending[0]["title"] == "Ticket #7"
+
+    def test_get_tickets_ids_are_token_ids(self, client):
+        """`id` is the ERC-721 token ID the frontend calls the contract with."""
+        tickets = client.get("/tickets").json()
+        assert [t["id"] for t in tickets] == [0, 7]
+
+    def test_get_tickets_skips_transactions_without_a_token_id(self, blockchain):
+        """A ticket_id that is not a token ID has no on-chain counterpart, so
+        it is left out rather than rendered as a card that cannot be read."""
+        from fastapi.testclient import TestClient
+        from api import create_app
+
+        blockchain.add_transaction(self._offering("3"))
+        blockchain.add_transaction(self._offering("TICKET-001"))
+
+        tickets = TestClient(create_app(blockchain)).get("/tickets").json()
+        assert [t["id"] for t in tickets] == [3]
 
     def test_health(self, client):
         resp = client.get("/health")

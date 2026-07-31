@@ -66,7 +66,7 @@ describe("TicketNFT", function () {
 
     it("emits TicketTransferred(tokenId, from, to, price)", async function () {
       const { ticket, alice, bob } = await loadFixture(mintedFixture);
-      const price = ethers.parseEther("0.01");
+      const price = await ticket.FACE_VALUE();
       await expect(ticket.connect(bob).resaleTransfer(0, { value: price }))
         .to.emit(ticket, "TicketTransferred")
         .withArgs(0, alice.address, bob.address, price);
@@ -78,6 +78,21 @@ describe("TicketNFT", function () {
       await expect(
         ticket.connect(bob).resaleTransfer(0, { value: scalperPrice })
       ).to.be.revertedWith("Scalping detected: Price exceeds face value");
+    });
+
+    it("reverts when the payment is below the face value", async function () {
+      const { ticket, bob } = await loadFixture(mintedFixture);
+      const underPrice = (await ticket.FACE_VALUE()) - 1n;
+      await expect(
+        ticket.connect(bob).resaleTransfer(0, { value: underPrice })
+      ).to.be.revertedWith("Payment below face value");
+    });
+
+    it("reverts when the buyer sends nothing at all", async function () {
+      const { ticket, bob } = await loadFixture(mintedFixture);
+      await expect(
+        ticket.connect(bob).resaleTransfer(0, { value: 0 })
+      ).to.be.revertedWith("Payment below face value");
     });
 
     it("reverts when the ticket is locked against resale", async function () {

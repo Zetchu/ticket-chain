@@ -47,10 +47,11 @@ contract TicketNFT is ERC721, Ownable {
         emit TicketMinted(to, tokenId, FACE_VALUE);
     }
 
-    /// @notice Buy `tokenId` from its current owner at `msg.value`.
+    /// @notice Buy `tokenId` from its current owner at exactly its face value.
     /// @dev The buyer initiates the sale; payment is forwarded to the seller
-    ///      and the ticket is transferred atomically. The sale price can never
-    ///      exceed the face value set at minting.
+    ///      and the ticket is transferred atomically. `msg.value` must equal
+    ///      the face value set at minting: paying more is scalping, and paying
+    ///      less would let a buyer take a ticket for nothing.
     function resaleTransfer(uint256 tokenId) external payable {
         Ticket storage ticket = tickets[tokenId];
         address seller = ownerOf(tokenId);
@@ -58,10 +59,10 @@ contract TicketNFT is ERC721, Ownable {
         require(ticket.isResellable, "Ticket is not resellable");
         require(msg.sender != seller, "Cannot buy your own ticket");
         require(msg.value <= ticket.faceValue, "Scalping detected: Price exceeds face value");
+        require(msg.value == ticket.faceValue, "Payment below face value");
 
         _inResale = true;
         _safeTransfer(seller, msg.sender, tokenId, "");
-        _inResale = false;
 
         (bool paid, ) = payable(seller).call{value: msg.value}("");
         require(paid, "Payment to seller failed");
@@ -84,16 +85,20 @@ contract TicketNFT is ERC721, Ownable {
     /// @dev Block raw ERC-721 transfers (transferFrom/safeTransferFrom): every
     ///      ownership change must go through resaleTransfer so the price
     ///      ceiling is always enforced. Minting (from == 0) stays allowed.
+    ///      The flag is consumed here rather than cleared by resaleTransfer:
+    ///      it authorizes exactly one transfer, so a buyer contract cannot
+    ///      re-enter from its onERC721Received hook (which fires after this
+    ///      returns) and move the ticket on while the guard is still open.
     function _update(address to, uint256 tokenId, address auth)
         internal
         override
         returns (address)
     {
         address from = _ownerOf(tokenId);
-        require(
-            from == address(0) || _inResale,
-            "Transfers only allowed through resaleTransfer"
-        );
+        if (from != address(0)) {
+            require(_inResale, "Transfers only allowed through resaleTransfer");
+            _inResale = false;
+        }
         return super._update(to, tokenId, auth);
     }
 }

@@ -14,7 +14,7 @@ Week 2 additions:
     GET /tickets for the React frontend.
 
 Usage:
-    python main.py [port] [--event EVENT_NAME]
+    python main.py [port] [--event EVENT_NAME] [--seed N]
 """
 
 import argparse
@@ -32,6 +32,7 @@ from ipv8.configuration import (
     Strategy,
     WalkerDefinition,
 )
+from ipv8.bootstrapping.udpbroadcast.bootstrapper import UDPBroadcastBootstrapper
 from ipv8.messaging.lazy_payload import VariablePayload, vp_compile
 from ipv8.peerdiscovery.network import PeerObserver
 from ipv8.types import Peer
@@ -43,6 +44,7 @@ from blockchain import (
     Block,
     Blockchain,
     Transaction,
+    generate_keypair,
     solve_puzzle,
     verify_puzzle,
 )
@@ -50,9 +52,43 @@ from blockchain import (
 DEFAULT_PORT = 8090
 DEFAULT_EVENT = "default-event"
 
+# Face value of a ticket in wei — matches TicketNFT.FACE_VALUE (0.05 ether).
+FACE_VALUE_WEI = 50_000_000_000_000_000
+
 # Bootstrap via UDP broadcast only: peers are discovered on the local
 # network, keeping the development overlay isolated from public trackers.
 LOCAL_BOOTSTRAP = [BootstrapperDefinition(Bootstrapper.UDPBroadcastBootstrapper, {})]
+
+
+# ---------------------------------------------------------------------------
+# Keep the UDP broadcast beacon off the event loop
+# ---------------------------------------------------------------------------
+# UDPBroadcastBootstrapper.beacon() announces this node by sending to all
+# 65,535 ports of the broadcast address in a blocking sendto() loop. On macOS
+# each broadcast sendto costs ~14ms, so a single sweep pins the asyncio event
+# loop for ~15 minutes: peer walks stall and the HTTP API never answers a
+# request. The sweep is fire-and-forget, so run it on a worker thread instead.
+# One sweep at a time — the bootstrapper re-beacons every 30s, which would
+# otherwise queue sweeps faster than they can finish.
+
+_blocking_beacon = UDPBroadcastBootstrapper.beacon
+
+
+def _threaded_beacon(self: UDPBroadcastBootstrapper, service_prefix: bytes) -> None:
+    if getattr(self, "_beacon_in_flight", False):
+        return
+    self._beacon_in_flight = True
+
+    def run() -> None:
+        try:
+            _blocking_beacon(self, service_prefix)
+        finally:
+            self._beacon_in_flight = False
+
+    asyncio.get_running_loop().run_in_executor(None, run)
+
+
+UDPBroadcastBootstrapper.beacon = _threaded_beacon
 
 
 def event_community_id(event_name: str) -> bytes:
@@ -284,7 +320,38 @@ async def start_api_server(community: TicketChainCommunity) -> asyncio.Task:
     return task
 
 
-async def start_node(port: int = DEFAULT_PORT, event: str = DEFAULT_EVENT) -> IPv8:
+def seed_tickets(community: TicketChainCommunity, count: int) -> None:
+    """Publish *count* ticket offerings for token IDs 0..count-1 and mine them.
+
+    Local development only. A freshly started node has an empty chain, so
+    GET /tickets returns nothing and the frontend grid stays empty. The token
+    IDs deliberately match the ones contracts/scripts/deploy.js mints, so each
+    card in the UI resolves against a ticket that exists on the Ethereum side.
+    """
+    if count <= 0:
+        return
+
+    seller_key, seller = generate_keypair()
+    _, buyer = generate_keypair()
+
+    for token_id in range(count):
+        tx = Transaction(
+            sender=seller,
+            recipient=buyer,
+            ticket_id=str(token_id),
+            price=FACE_VALUE_WEI,
+            face_value=FACE_VALUE_WEI,
+        )
+        tx.sign(seller_key)
+        community.submit_transaction(tx)
+
+    community.mine_block()
+    print(f"Seeded {count} ticket offering(s) for token IDs 0..{count - 1}")
+
+
+async def start_node(
+    port: int = DEFAULT_PORT, event: str = DEFAULT_EVENT, seed: int = 0
+) -> IPv8:
     # Localized Peer Community Broadcasting: partition the overlay by event.
     TicketChainCommunity.community_id = event_community_id(event)
 
@@ -299,6 +366,7 @@ async def start_node(port: int = DEFAULT_PORT, event: str = DEFAULT_EVENT) -> IP
     community = next(
         o for o in ipv8.overlays if isinstance(o, TicketChainCommunity)
     )
+    seed_tickets(community, seed)
     await start_api_server(community)
     return ipv8
 
@@ -315,12 +383,18 @@ def parse_args() -> argparse.Namespace:
              f"(default {DEFAULT_EVENT!r}). Nodes only exchange messages "
              "with peers using the same event name.",
     )
+    parser.add_argument(
+        "--seed", type=int, default=0, metavar="N",
+        help="Local development: publish and mine N ticket offerings for "
+             "token IDs 0..N-1 at startup, matching the tickets minted by "
+             "the Hardhat deploy script (default 0 — no seeding).",
+    )
     return parser.parse_args()
 
 
 async def main() -> None:
     args = parse_args()
-    await start_node(args.port, args.event)
+    await start_node(args.port, args.event, args.seed)
     await run_forever()
 
 
