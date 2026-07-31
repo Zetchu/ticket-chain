@@ -4,15 +4,26 @@ Each node maintains a local Blockchain instance. When a transaction is
 submitted or a block is mined, it is broadcast to all known peers using
 IPv8 lazy-payload messages. Receiving peers validate before accepting.
 
+Week 2 additions:
+  - Search puzzle sequence: every broadcast message carries a per-message
+    PoW nonce (Sybil/spam resistance). Receivers verify before processing.
+  - Localized Peer Community Broadcasting: the overlay community_id is
+    derived from an event name, partitioning the network so only nodes
+    interested in the same event discover and message each other.
+  - HTTP API on http://127.0.0.1:8080 (FastAPI/uvicorn) exposing
+    GET /tickets for the React frontend.
+
 Usage:
-    python main.py [port]
+    python main.py [port] [--event EVENT_NAME]
 """
 
+import argparse
+import asyncio
+import hashlib
 import json
-import sys
 from asyncio import run
-from dataclasses import dataclass
 
+import uvicorn
 from ipv8.community import Community, CommunitySettings
 from ipv8.configuration import (
     Bootstrapper,
@@ -27,13 +38,32 @@ from ipv8.types import Peer
 from ipv8.util import run_forever
 from ipv8_service import IPv8
 
-from blockchain import Blockchain, Transaction, Block
+from api import API_HOST, API_PORT, create_app
+from blockchain import (
+    Block,
+    Blockchain,
+    Transaction,
+    solve_puzzle,
+    verify_puzzle,
+)
 
 DEFAULT_PORT = 8090
+DEFAULT_EVENT = "default-event"
 
 # Bootstrap via UDP broadcast only: peers are discovered on the local
 # network, keeping the development overlay isolated from public trackers.
 LOCAL_BOOTSTRAP = [BootstrapperDefinition(Bootstrapper.UDPBroadcastBootstrapper, {})]
+
+
+def event_community_id(event_name: str) -> bytes:
+    """Derive a 20-byte overlay community_id from an event name.
+
+    Localized Peer Community Broadcasting: nodes running with the same
+    --event value share an overlay and exchange messages; nodes with a
+    different event name are on a disjoint overlay and never see them.
+    This partitions broadcast traffic by event locality.
+    """
+    return hashlib.sha1(f"ticketchain-{event_name}".encode()).digest()
 
 
 # ---------------------------------------------------------------------------
@@ -42,33 +72,48 @@ LOCAL_BOOTSTRAP = [BootstrapperDefinition(Bootstrapper.UDPBroadcastBootstrapper,
 
 @vp_compile
 class TransactionPayload(VariablePayload):
-    """Carries a single serialized Transaction between peers."""
+    """Carries a serialized Transaction plus its search puzzle nonce.
+
+    The sender must solve the search puzzle over the serialized data
+    before broadcasting; receivers verify it in O(1) before any further
+    processing (Sybil/spam resistance).
+    """
     msg_id = 1
-    format_list = ["4?H"]  # length-prefixed bytes
-    names = ["data"]
+    format_list = ["4?H", "Q"]  # length-prefixed bytes, u64 puzzle nonce
+    names = ["data", "puzzle_nonce"]
 
     # Convenience constructors
     @classmethod
     def from_transaction(cls, tx: Transaction) -> "TransactionPayload":
-        return cls(json.dumps(tx.to_dict()).encode())
+        data = json.dumps(tx.to_dict()).encode()
+        nonce = solve_puzzle(data)
+        return cls(data, nonce)
 
     def to_transaction(self) -> Transaction:
         return Transaction.from_dict(json.loads(self.data))
 
+    def puzzle_ok(self) -> bool:
+        return verify_puzzle(self.data, self.puzzle_nonce)
+
 
 @vp_compile
 class BlockPayload(VariablePayload):
-    """Carries a single serialized Block between peers."""
+    """Carries a serialized Block plus its search puzzle nonce."""
     msg_id = 2
-    format_list = ["4?H"]
-    names = ["data"]
+    format_list = ["4?H", "Q"]
+    names = ["data", "puzzle_nonce"]
 
     @classmethod
     def from_block(cls, block: Block) -> "BlockPayload":
-        return cls(json.dumps(block.to_dict()).encode())
+        data = json.dumps(block.to_dict()).encode()
+        nonce = solve_puzzle(data)
+        return cls(data, nonce)
 
     def to_block(self) -> Block:
         return Block.from_dict(json.loads(self.data))
+
+    def puzzle_ok(self) -> bool:
+        return verify_puzzle(self.data, self.puzzle_nonce)
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +121,14 @@ class BlockPayload(VariablePayload):
 # ---------------------------------------------------------------------------
 
 class TicketChainCommunity(Community, PeerObserver):
-    """Overlay for propagating ticket transactions and blocks between local peers."""
+    """Overlay for propagating ticket transactions and blocks between local peers.
 
-    community_id = b"ticketchain-cs414-w1"  # 20-byte overlay identifier
+    Localized Peer Community Broadcasting: the community_id below is a
+    default; start_node() overrides it per-event via event_community_id(),
+    so overlays are partitioned by event name.
+    """
+
+    community_id = event_community_id(DEFAULT_EVENT)  # 20-byte overlay identifier
 
     def __init__(self, settings: CommunitySettings) -> None:
         super().__init__(settings)
@@ -152,12 +202,22 @@ class TicketChainCommunity(Community, PeerObserver):
     # ------------------------------------------------------------------
 
     def _on_transaction(self, peer: Peer, payload: TransactionPayload) -> None:
+        # Search puzzle check first: drop spam cheaply before any parsing
+        # or signature verification.
+        if not payload.puzzle_ok():
+            print(f"[{self._tag()}] rx tx from {peer} → dropped (invalid search puzzle)")
+            return
+
         tx = payload.to_transaction()
         accepted = self.blockchain.add_transaction(tx)
         status = "accepted" if accepted else "rejected"
         print(f"[{self._tag()}] rx tx {tx.tx_hash()[:8]}… from {peer} → {status}")
 
     def _on_block(self, peer: Peer, payload: BlockPayload) -> None:
+        if not payload.puzzle_ok():
+            print(f"[{self._tag()}] rx block from {peer} → dropped (invalid search puzzle)")
+            return
+
         block = payload.to_block()
         # Only append if it extends our chain and passes full validation
         expected_index = len(self.blockchain.chain)
@@ -210,19 +270,57 @@ def build_config(port: int) -> dict:
     return builder.finalize()
 
 
-async def start_node(port: int = DEFAULT_PORT) -> IPv8:
+async def start_api_server(community: TicketChainCommunity) -> asyncio.Task:
+    """Start the FastAPI/uvicorn HTTP server as a background asyncio task.
+
+    Serves GET /tickets on http://127.0.0.1:8080 for the React frontend,
+    reading live from the community's Blockchain instance.
+    """
+    app = create_app(community.blockchain)
+    config = uvicorn.Config(app, host=API_HOST, port=API_PORT, log_level="warning")
+    server = uvicorn.Server(config)
+    task = asyncio.create_task(server.serve())
+    print(f"HTTP API listening on http://{API_HOST}:{API_PORT} (GET /tickets)")
+    return task
+
+
+async def start_node(port: int = DEFAULT_PORT, event: str = DEFAULT_EVENT) -> IPv8:
+    # Localized Peer Community Broadcasting: partition the overlay by event.
+    TicketChainCommunity.community_id = event_community_id(event)
+
     ipv8 = IPv8(
         build_config(port),
         extra_communities={"TicketChainCommunity": TicketChainCommunity},
     )
     await ipv8.start()
-    print(f"IPv8 node listening on UDP port {port}")
+    print(f"IPv8 node listening on UDP port {port} (event overlay: {event!r})")
+
+    # Find our community instance and attach the HTTP API to it.
+    community = next(
+        o for o in ipv8.overlays if isinstance(o, TicketChainCommunity)
+    )
+    await start_api_server(community)
     return ipv8
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="TicketChain P2P node")
+    parser.add_argument(
+        "port", nargs="?", type=int, default=DEFAULT_PORT,
+        help=f"UDP port for IPv8 (default {DEFAULT_PORT})",
+    )
+    parser.add_argument(
+        "--event", default=DEFAULT_EVENT,
+        help="Event name for the localized community overlay "
+             f"(default {DEFAULT_EVENT!r}). Nodes only exchange messages "
+             "with peers using the same event name.",
+    )
+    return parser.parse_args()
+
+
 async def main() -> None:
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
-    await start_node(port)
+    args = parse_args()
+    await start_node(args.port, args.event)
     await run_forever()
 
 

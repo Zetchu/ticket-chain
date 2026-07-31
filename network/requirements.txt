@@ -1,3 +1,6 @@
 pyipv8==2.13.0
 # pyipv8 2.13 references EC curves removed from newer cryptography releases
 cryptography==43.0.3
+# Week 2: HTTP API for the React frontend (GET /tickets on 127.0.0.1:8080)
+fastapi==0.116.1
+uvicorn[standard]==0.35.0

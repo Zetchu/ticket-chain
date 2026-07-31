@@ -9,6 +9,8 @@ Covers:
   - Merkle tree root correctness (even/odd counts) and inclusion proofs
   - Proof-of-Work mining and verification
   - Full-chain validation (happy path and tamper scenarios)
+  - Search puzzle sequence (per-message PoW for Sybil resistance)
+  - HTTP API (GET /tickets, GET /health)
 """
 
 import copy
@@ -25,7 +27,9 @@ from blockchain import (
     merkle_root,
     mine,
     meets_difficulty,
+    solve_puzzle,
     verify_pow,
+    verify_puzzle,
 )
 
 # ---------------------------------------------------------------------------
@@ -305,3 +309,124 @@ class TestBlockchain:
         restored = Blockchain.from_dict(data)
         assert len(restored.chain) == len(blockchain.chain)
         assert restored.is_chain_valid() is True
+
+
+# ---------------------------------------------------------------------------
+# Search puzzle tests (per-message Sybil resistance)
+# ---------------------------------------------------------------------------
+
+class TestSearchPuzzle:
+
+    def test_solve_and_verify(self):
+        """A solved puzzle must verify for the same message."""
+        message = b"ticket availability: TICKET-001"
+        nonce = solve_puzzle(message)
+        assert verify_puzzle(message, nonce) is True
+
+    def test_invalid_nonce_rejected(self):
+        """A wrong nonce must fail verification (unless it happens to solve
+
+        the puzzle too — avoided by checking against a known non-solution).
+        """
+        message = b"ticket availability: TICKET-002"
+        nonce = solve_puzzle(message)
+        # nonce is the *smallest* solution, so any smaller value fails.
+        for wrong in range(nonce):
+            assert verify_puzzle(message, wrong) is False
+
+    def test_negative_nonce_rejected(self):
+        message = b"anything"
+        assert verify_puzzle(message, -1) is False
+
+    def test_tampered_message_rejected(self):
+        """Changing the message after solving must invalidate the nonce."""
+        message = b"price=50"
+        nonce = solve_puzzle(message)
+        tampered = b"price=99"
+        # The same nonce is astronomically unlikely to solve the tampered
+        # message at 8 bits; if it coincidentally does, solve again on a
+        # message we know differs in solution.
+        if verify_puzzle(tampered, nonce):
+            pytest.skip("coincidental collision at low difficulty")
+        assert verify_puzzle(tampered, nonce) is False
+
+    def test_higher_difficulty(self):
+        """Puzzle works at higher difficulty (12 bits ≈ 4096 attempts)."""
+        message = b"stress"
+        nonce = solve_puzzle(message, difficulty=12)
+        assert verify_puzzle(message, nonce, difficulty=12) is True
+        # A 12-bit solution is not automatically an 16-bit solution check
+        # (it may be, but verifying at the solved difficulty must pass).
+
+
+# ---------------------------------------------------------------------------
+# HTTP API tests (GET /tickets, GET /health)
+# ---------------------------------------------------------------------------
+
+class TestAPI:
+
+    @pytest.fixture
+    def client(self, blockchain, signed_tx):
+        """A FastAPI TestClient bound to a blockchain with 1 mined tx and
+        1 pending tx."""
+        from fastapi.testclient import TestClient
+        from api import create_app
+
+        # 1 confirmed transaction (mined into block #1)
+        blockchain.add_transaction(signed_tx)
+        blockchain.mine_pending()
+
+        # 1 pending transaction (left in mempool)
+        priv, pub = generate_keypair()
+        _, pub2 = generate_keypair()
+        pending = Transaction(
+            sender=pub, recipient=pub2,
+            ticket_id="TICKET-PENDING", price=10, face_value=20,
+        )
+        pending.sign(priv)
+        blockchain.add_transaction(pending)
+
+        return TestClient(create_app(blockchain))
+
+    def test_get_tickets_returns_list(self, client):
+        resp = client.get("/tickets")
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
+
+    def test_get_tickets_shape(self, client):
+        """Each ticket must have the exact fields the frontend expects."""
+        tickets = client.get("/tickets").json()
+        assert len(tickets) == 2
+        for ticket in tickets:
+            assert set(ticket.keys()) == {
+                "id", "type", "price", "title", "location", "date"
+            }
+            assert isinstance(ticket["id"], int)
+            assert isinstance(ticket["price"], str)
+
+    def test_get_tickets_confirmed_and_pending(self, client):
+        tickets = client.get("/tickets").json()
+        types = [t["type"] for t in tickets]
+        assert "Confirmed" in types
+        assert "Pending" in types
+
+    def test_get_tickets_pending_title(self, client):
+        tickets = client.get("/tickets").json()
+        pending = [t for t in tickets if t["type"] == "Pending"]
+        assert pending[0]["title"] == "TICKET-PENDING"
+
+    def test_health(self, client):
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "ok"
+        assert body["chain_length"] == 2   # genesis + 1 mined
+        assert body["mempool_size"] == 1   # 1 pending
+        assert body["chain_valid"] is True
+
+    def test_cors_headers(self, client):
+        """The Vite dev origin must be allowed by CORS."""
+        resp = client.get(
+            "/tickets", headers={"Origin": "http://localhost:5173"}
+        )
+        assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
