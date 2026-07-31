@@ -9,6 +9,7 @@ from .merkle import MerkleTree, merkle_root
 from .block import Block, BlockHeader, genesis_block
 from .pow import mine, verify_pow, meets_difficulty, DIFFICULTY
 from .chain import Blockchain
+from .puzzle import solve_puzzle, verify_puzzle, PUZZLE_DIFFICULTY
 
 __all__ = [
     "Transaction",
@@ -23,4 +24,7 @@ __all__ = [
     "meets_difficulty",
     "DIFFICULTY",
     "Blockchain",
+    "solve_puzzle",
+    "verify_puzzle",
+    "PUZZLE_DIFFICULTY",
 ]
