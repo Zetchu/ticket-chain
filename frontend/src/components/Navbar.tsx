@@ -1,5 +1,6 @@
+// src/components/Navbar.tsx
 import { useConnection, useConnect, useDisconnect, useConnectors } from 'wagmi';
-import { AppBar, Toolbar, Typography, Button, Box, Chip } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box } from '@mui/material';
 
 export default function Navbar() {
   const { connect } = useConnect();
@@ -13,48 +14,77 @@ export default function Navbar() {
 
   return (
     <AppBar
-      position='static'
+      position='sticky'
       color='transparent'
       elevation={0}
-      sx={{ borderBottom: '1px solid #334155' }}
+      sx={{
+        backgroundColor: 'rgba(251, 251, 253, 0.8)',
+        backdropFilter: 'saturate(180%) blur(20px)',
+        WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+        borderBottom: '1px solid',
+        borderColor: 'divider',
+      }}
     >
-      <Toolbar sx={{ justifyContent: 'space-between' }}>
+      <Toolbar
+        sx={{ justifyContent: 'space-between', minHeight: '52px !important', px: { xs: 2, sm: 3 } }}
+      >
         <Typography
-          variant='h6'
-          sx={{ fontWeight: 800, color: 'white' }}
+          sx={{ fontWeight: 600, fontSize: '0.95rem', color: 'text.primary', letterSpacing: '-0.01em' }}
         >
-          TicketChain.
+          TicketChain
         </Typography>
-        <Box>
-          {isConnected ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Chip
-                label={`${address?.slice(0, 6)}...${address?.slice(-4)}`}
+
+        {isConnected ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+              <Box
                 sx={{
-                  bgcolor: '#1e293b',
-                  color: 'white',
-                  fontFamily: 'monospace',
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  bgcolor: '#30d158',
                 }}
               />
-              <Button
-                variant='outlined'
-                color='error'
-                onClick={() => disconnect()}
+              <Typography
+                sx={{
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  fontSize: '0.82rem',
+                  color: 'text.secondary',
+                }}
               >
-                Disconnect
-              </Button>
+                {address?.slice(0, 6)}…{address?.slice(-4)}
+              </Typography>
             </Box>
-          ) : metaMaskConnector ? (
             <Button
-              variant='contained'
-              onClick={() => connect({ connector: metaMaskConnector })}
+              size='small'
+              onClick={() => disconnect()}
+              sx={{
+                color: 'text.secondary',
+                minWidth: 'auto',
+                px: 1.5,
+                '&:hover': { color: '#ff3b30', backgroundColor: 'transparent' },
+              }}
             >
-              Connect MetaMask
+              Sign out
             </Button>
-          ) : (
-            <Typography color='error'>MetaMask not installed</Typography>
-          )}
-        </Box>
+          </Box>
+        ) : metaMaskConnector ? (
+          <Button
+            variant='contained'
+            disableElevation
+            onClick={() => connect({ connector: metaMaskConnector })}
+            sx={{
+              bgcolor: 'text.primary',
+              '&:hover': { bgcolor: '#000000' },
+            }}
+          >
+            Connect Wallet
+          </Button>
+        ) : (
+          <Typography sx={{ color: 'text.secondary', fontSize: '0.85rem' }}>
+            MetaMask not installed
+          </Typography>
+        )}
       </Toolbar>
     </AppBar>
   );

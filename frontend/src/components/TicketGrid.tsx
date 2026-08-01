@@ -1,5 +1,5 @@
 // src/components/TicketGrid.tsx
-import { Typography, Box, Grid, CircularProgress, Alert } from '@mui/material';
+import { Typography, Box, Grid, CircularProgress } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import TicketCard, { type Ticket } from './TicketCard';
 
@@ -26,30 +26,42 @@ export default function TicketGrid({ isConnected }: { isConnected: boolean }) {
   });
 
   return (
-    <Box sx={{ mt: 4, mb: 8 }}>
+    <Box component='section'>
       <Typography
-        variant='h5'
-        gutterBottom
-        sx={{ borderBottom: '1px solid #334155', pb: 2, mb: 4, color: 'white' }}
+        sx={{
+          fontSize: '1.5rem',
+          fontWeight: 600,
+          letterSpacing: '-0.01em',
+          color: 'text.primary',
+          mb: 4,
+        }}
       >
         Available Events
       </Typography>
 
-      {/* Render loading, error, or the live data grid */}
       {isPending ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-          <CircularProgress />
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}>
+          <CircularProgress size={26} thickness={4} sx={{ color: 'text.secondary' }} />
         </Box>
       ) : isError ? (
-        <Alert severity='error'>
-          Failed to fetch P2P tickets. Ensure the PyIPv8 node is running on port
-          8080. ({error.message})
-        </Alert>
-      ) : tickets && tickets.length > 0 ? (
-        <Grid
-          container
-          spacing={3}
+        <Box
+          sx={{
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: '16px',
+            p: 4,
+            textAlign: 'center',
+          }}
         >
+          <Typography sx={{ fontWeight: 600, color: 'text.primary', mb: 0.5 }}>
+            Can't reach the local network
+          </Typography>
+          <Typography sx={{ fontSize: '0.88rem', color: 'text.secondary' }}>
+            Make sure the PyIPv8 node is running on port 8080. ({error.message})
+          </Typography>
+        </Box>
+      ) : tickets && tickets.length > 0 ? (
+        <Grid container spacing={2.5}>
           {tickets.map((ticket) => (
             <Grid
               // A token can appear both mined and pending, so the status is
@@ -65,9 +77,11 @@ export default function TicketGrid({ isConnected }: { isConnected: boolean }) {
           ))}
         </Grid>
       ) : (
-        <Typography color='text.secondary'>
-          No local tickets discovered on the P2P network.
-        </Typography>
+        <Box sx={{ textAlign: 'center', py: 10 }}>
+          <Typography sx={{ color: 'text.secondary', fontSize: '0.95rem' }}>
+            No local tickets discovered on the P2P network yet.
+          </Typography>
+        </Box>
       )}
     </Box>
   );
