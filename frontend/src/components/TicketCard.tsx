@@ -6,6 +6,7 @@ import { useWriteContract, useWaitForTransactionReceipt, useReadContract } from 
 import { useState } from 'react';
 import { formatEther, type Abi } from 'viem';
 import TicketNFTData from '../contracts/TicketNFT.json'; // Written by scripts/deploy.js
+import { hoverBorder, mutedSurface } from '../theme';
 
 // Importing JSON widens these to `string` / `unknown[]`, but wagmi wants a
 // 0x-prefixed address and an Abi, so restate the types here.
@@ -79,18 +80,20 @@ export default function TicketCard({
   return (
     <Card
       elevation={0}
-      sx={{
+      sx={(theme) => ({
         bgcolor: 'background.paper',
         border: '1px solid',
         borderColor: 'divider',
         borderRadius: 3.5,
         transition: 'box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease',
         '&:hover': {
-          borderColor: '#bcbcc0',
-          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
+          borderColor: hoverBorder(theme.palette.mode),
+          boxShadow: theme.palette.mode === 'dark'
+            ? '0 4px 20px rgba(0, 0, 0, 0.4)'
+            : '0 4px 20px rgba(0, 0, 0, 0.06)',
           transform: 'translateY(-2px)',
         },
-      }}
+      })}
     >
       <CardContent sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2.5 }}>
@@ -100,7 +103,7 @@ export default function TicketCard({
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                bgcolor: ticket.type === 'Confirmed' ? '#30d158' : '#ff9f0a',
+                bgcolor: ticket.type === 'Confirmed' ? 'success.main' : 'warning.main',
               }}
             />
             <Typography
@@ -112,15 +115,15 @@ export default function TicketCard({
 
           {isReadPending ? (
             <Box
-              sx={{
+              sx={(theme) => ({
                 width: 48,
                 height: 16,
                 borderRadius: 1,
-                bgcolor: '#f0f0f2',
-              }}
+                bgcolor: mutedSurface(theme.palette.mode),
+              })}
             />
           ) : readError ? (
-            <Typography sx={{ fontSize: '0.8rem', color: '#ff3b30' }}>Unavailable</Typography>
+            <Typography sx={{ fontSize: '0.8rem', color: 'error.main' }}>Unavailable</Typography>
           ) : (
             <Typography sx={{ fontSize: '1rem', fontWeight: 600, color: 'text.primary' }}>
               {price !== undefined ? `${formatEther(price)} ETH` : ticket.price}
@@ -154,15 +157,17 @@ export default function TicketCard({
           onClick={handlePurchase}
           disabled={!isConnected || price === undefined || isWritePending || isConfirming}
           sx={{
-            bgcolor: isConfirmed ? '#30d158' : 'text.primary',
-            color: '#ffffff',
+            bgcolor: isConfirmed ? 'success.main' : 'text.primary',
+            color: isConfirmed ? 'common.white' : 'background.default',
             py: 1.1,
             fontSize: '0.92rem',
-            '&:hover': { bgcolor: isConfirmed ? '#30d158' : '#000000' },
-            '&.Mui-disabled': {
-              bgcolor: isPending ? '#1d1d1f' : '#e8e8ed',
-              color: isPending ? 'rgba(255,255,255,0.7)' : '#a1a1a6',
+            '&:hover': {
+              bgcolor: isConfirmed ? 'success.main' : 'text.primary',
+              opacity: 0.85,
             },
+            '&.Mui-disabled': isPending
+              ? { bgcolor: 'text.primary', color: 'background.default', opacity: 0.5 }
+              : { bgcolor: 'action.disabledBackground', color: 'action.disabled' },
           }}
         >
           {isWritePending
