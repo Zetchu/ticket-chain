@@ -4,12 +4,14 @@ import { WagmiProvider } from 'wagmi';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { config } from './wagmi.config';
+import './index.css';
 
-// Import MUI default fonts
-import '@fontsource/roboto/300.css';
-import '@fontsource/roboto/400.css';
-import '@fontsource/roboto/500.css';
-import '@fontsource/roboto/700.css';
+// Inter stands in for SF Pro on non-Apple platforms; on macOS/iOS the theme's
+// font stack prefers the system font (-apple-system) over this entirely.
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
 
 const queryClient = new QueryClient();
 
