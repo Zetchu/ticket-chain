@@ -1,6 +1,5 @@
-:root {
-  color-scheme: light;
-}
+/* color-scheme is set dynamically by MuiCssBaseline (see theme.ts) so native
+   form controls and scrollbars follow the in-app light/dark toggle. */
 
 * {
   box-sizing: border-box;
