@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from dataclasses import dataclass, field
 
 from .transaction import Transaction
@@ -138,6 +137,20 @@ class Block:
 # Genesis block
 # ---------------------------------------------------------------------------
 
+# Fixed timestamp for the genesis block. Every node constructs its own
+# Blockchain() independently (see chain.py __post_init__), and mine() is a
+# deterministic search over the header bytes — so a genesis header that is
+# byte-for-byte identical on every node mines down to the identical hash
+# everywhere. Using time.time() here would give each node its own unique
+# genesis hash, which then makes prev_hash linkage fail on *every* received
+# block (block #1's prev_hash points at the sender's genesis, which never
+# matches a receiver's differently-timestamped one) — silently breaking all
+# P2P block propagation. This is not "block 0 was created at this instant";
+# it is a shared constant all nodes must agree on, like Bitcoin's own
+# hardcoded genesis timestamp.
+GENESIS_TIMESTAMP: float = 0.0
+
+
 def genesis_block(difficulty: int = 16) -> Block:
     """Create and return the unmined genesis block (index 0).
 
@@ -149,7 +162,7 @@ def genesis_block(difficulty: int = 16) -> Block:
         index=0,
         prev_hash="0" * 64,
         merkle_root="",  # no transactions
-        timestamp=time.time(),
+        timestamp=GENESIS_TIMESTAMP,
         difficulty=difficulty,
         nonce=0,
     )

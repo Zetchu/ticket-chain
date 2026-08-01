@@ -37,6 +37,22 @@ describe("TicketNFT", function () {
       await expect(ticket.connect(alice).mintTicket(bob.address))
         .to.be.revertedWithCustomError(ticket, "OwnableUnauthorizedAccount");
     });
+
+    it("assigns sequential token IDs across multiple mints", async function () {
+      const { ticket, alice, bob } = await loadFixture(deployFixture);
+      await ticket.mintTicket(alice.address);
+      await ticket.mintTicket(bob.address);
+      await ticket.mintTicket(alice.address);
+      expect(await ticket.ownerOf(0)).to.equal(alice.address);
+      expect(await ticket.ownerOf(1)).to.equal(bob.address);
+      expect(await ticket.ownerOf(2)).to.equal(alice.address);
+    });
+
+    it("rejects minting to the zero address", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await expect(ticket.mintTicket(ethers.ZeroAddress))
+        .to.be.revertedWithCustomError(ticket, "ERC721InvalidReceiver");
+    });
   });
 
   describe("getTicketDetails", function () {
@@ -48,6 +64,29 @@ describe("TicketNFT", function () {
     it("reverts for a nonexistent ticket", async function () {
       const { ticket } = await loadFixture(deployFixture);
       await expect(ticket.getTicketDetails(99))
+        .to.be.revertedWithCustomError(ticket, "ERC721NonexistentToken");
+    });
+  });
+
+  describe("setResellable (organizer access control)", function () {
+    it("lets the organizer lock and re-unlock a ticket", async function () {
+      const { ticket } = await loadFixture(mintedFixture);
+      await ticket.setResellable(0, false);
+      expect((await ticket.tickets(0)).isResellable).to.equal(false);
+
+      await ticket.setResellable(0, true);
+      expect((await ticket.tickets(0)).isResellable).to.equal(true);
+    });
+
+    it("rejects setResellable from a non-organizer account", async function () {
+      const { ticket, alice } = await loadFixture(mintedFixture);
+      await expect(ticket.connect(alice).setResellable(0, false))
+        .to.be.revertedWithCustomError(ticket, "OwnableUnauthorizedAccount");
+    });
+
+    it("reverts for a nonexistent ticket", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await expect(ticket.setResellable(99, false))
         .to.be.revertedWithCustomError(ticket, "ERC721NonexistentToken");
     });
   });
@@ -109,6 +148,52 @@ describe("TicketNFT", function () {
         ticket.connect(alice).resaleTransfer(0, { value: 0 })
       ).to.be.revertedWith("Cannot buy your own ticket");
     });
+
+    it("reverts for a nonexistent ticket", async function () {
+      const { ticket, bob } = await loadFixture(deployFixture);
+      await expect(
+        ticket.connect(bob).resaleTransfer(99, { value: 0 })
+      ).to.be.revertedWithCustomError(ticket, "ERC721NonexistentToken");
+    });
+
+    it("supports being resold multiple times in a row, always at face value", async function () {
+      const { ticket, organizer, alice, bob } = await loadFixture(mintedFixture);
+      const price = await ticket.FACE_VALUE();
+
+      // alice -> bob
+      await ticket.connect(bob).resaleTransfer(0, { value: price });
+      expect(await ticket.ownerOf(0)).to.equal(bob.address);
+
+      // bob -> organizer (any account can be seller/buyer in turn)
+      await ticket.connect(organizer).resaleTransfer(0, { value: price });
+      expect(await ticket.ownerOf(0)).to.equal(organizer.address);
+
+      // organizer -> alice
+      await expect(
+        ticket.connect(alice).resaleTransfer(0, { value: price })
+      ).to.changeEtherBalances([alice, organizer], [-price, price]);
+      expect(await ticket.ownerOf(0)).to.equal(alice.address);
+
+      // the face-value ceiling still holds for the fourth owner
+      expect(await ticket.getTicketDetails(0)).to.equal(price);
+    });
+
+    it("reverts and leaves ownership unchanged when payment to the seller fails", async function () {
+      const { ticket, organizer, bob } = await loadFixture(deployFixture);
+      const RejectsEther = await ethers.getContractFactory("RejectsEther");
+      const rejector = await RejectsEther.deploy();
+      const rejectorAddress = await rejector.getAddress();
+
+      await ticket.mintTicket(rejectorAddress);
+      const price = await ticket.FACE_VALUE();
+
+      await expect(
+        ticket.connect(bob).resaleTransfer(0, { value: price })
+      ).to.be.revertedWith("Payment to seller failed");
+
+      // the whole transaction (including the token transfer) rolled back
+      expect(await ticket.ownerOf(0)).to.equal(rejectorAddress);
+    });
   });
 
   describe("Raw ERC-721 transfer lockdown", function () {
@@ -126,6 +211,39 @@ describe("TicketNFT", function () {
           alice.address, bob.address, 0
         )
       ).to.be.revertedWith("Transfers only allowed through resaleTransfer");
+    });
+  });
+
+  describe("Unauthorized transfers", function () {
+    it("blocks a stranger with no approval from moving someone else's ticket", async function () {
+      const { ticket, alice, bob } = await loadFixture(mintedFixture);
+      // bob has neither ownership nor approval over token 0 — the anti-scalping
+      // lockdown in _update fires before ERC-721's own auth check even runs,
+      // so this reverts with the resale-lockdown reason, not an approval error.
+      await expect(
+        ticket.connect(bob).transferFrom(alice.address, bob.address, 0)
+      ).to.be.revertedWith("Transfers only allowed through resaleTransfer");
+    });
+
+    it("blocks a per-token approved address from bypassing the price ceiling", async function () {
+      const { ticket, alice, bob } = await loadFixture(mintedFixture);
+      await ticket.connect(alice).approve(bob.address, 0);
+      expect(await ticket.getApproved(0)).to.equal(bob.address);
+
+      await expect(
+        ticket.connect(bob).transferFrom(alice.address, bob.address, 0)
+      ).to.be.revertedWith("Transfers only allowed through resaleTransfer");
+    });
+
+    it("blocks an operator approved for all tokens from bypassing the price ceiling", async function () {
+      const { ticket, alice, bob } = await loadFixture(mintedFixture);
+      await ticket.connect(alice).setApprovalForAll(bob.address, true);
+
+      await expect(
+        ticket.connect(bob).transferFrom(alice.address, bob.address, 0)
+      ).to.be.revertedWith("Transfers only allowed through resaleTransfer");
+      // ticket never moved despite the blanket approval
+      expect(await ticket.ownerOf(0)).to.equal(alice.address);
     });
   });
 });

@@ -4,3 +4,6 @@ cryptography==43.0.3
 # Week 2: HTTP API for the React frontend (GET /tickets on 127.0.0.1:8080)
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
+# Test-only: starlette.testclient (used by test_blockchain.py::TestAPI) requires
+# httpx even though the app itself never imports it.
+httpx==0.28.1

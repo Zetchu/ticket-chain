@@ -21,10 +21,22 @@ import argparse
 import asyncio
 import hashlib
 import json
+import sys
 from asyncio import run
+
+# The status logs below use non-ASCII arrows/ellipses (→, …). On Windows the
+# console's default codepage (cp1252) can't encode them, which crashes the
+# print() mid-message — inside an ipv8 packet handler, that surfaces as a
+# swallowed "Exception occurred while handling packet!" per received message
+# rather than a visible log line. Force UTF-8 so logging never depends on the
+# host console's codepage. No-op on platforms already running UTF-8 consoles.
+if sys.stdout.encoding != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import uvicorn
 from ipv8.community import Community, CommunitySettings
+from ipv8.lazy_community import lazy_wrapper
 from ipv8.configuration import (
     Bootstrapper,
     BootstrapperDefinition,
@@ -115,7 +127,9 @@ class TransactionPayload(VariablePayload):
     processing (Sybil/spam resistance).
     """
     msg_id = 1
-    format_list = ["4?H", "Q"]  # length-prefixed bytes, u64 puzzle nonce
+    # 'varlenH': bytes prefixed with a 2-byte length (up to 65535 bytes) —
+    # ample for one serialized Transaction. 'Q': u64 puzzle nonce.
+    format_list = ["varlenH", "Q"]
     names = ["data", "puzzle_nonce"]
 
     # Convenience constructors
@@ -136,7 +150,9 @@ class TransactionPayload(VariablePayload):
 class BlockPayload(VariablePayload):
     """Carries a serialized Block plus its search puzzle nonce."""
     msg_id = 2
-    format_list = ["4?H", "Q"]
+    # 'varlenI': bytes prefixed with a 4-byte length (up to ~4GB) — a block
+    # can hold many transactions, so it gets more headroom than a single tx.
+    format_list = ["varlenI", "Q"]
     names = ["data", "puzzle_nonce"]
 
     @classmethod
@@ -237,6 +253,7 @@ class TicketChainCommunity(Community, PeerObserver):
     # Incoming message handlers
     # ------------------------------------------------------------------
 
+    @lazy_wrapper(TransactionPayload)
     def _on_transaction(self, peer: Peer, payload: TransactionPayload) -> None:
         # Search puzzle check first: drop spam cheaply before any parsing
         # or signature verification.
@@ -249,6 +266,7 @@ class TicketChainCommunity(Community, PeerObserver):
         status = "accepted" if accepted else "rejected"
         print(f"[{self._tag()}] rx tx {tx.tx_hash()[:8]}… from {peer} → {status}")
 
+    @lazy_wrapper(BlockPayload)
     def _on_block(self, peer: Peer, payload: BlockPayload) -> None:
         if not payload.puzzle_ok():
             print(f"[{self._tag()}] rx block from {peer} → dropped (invalid search puzzle)")

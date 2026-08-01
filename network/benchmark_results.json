@@ -1,0 +1,36 @@
+{
+  "transaction_execution": {
+    "sign": {
+      "n": 200,
+      "min_ms": 0.3083,
+      "max_ms": 5.2597,
+      "avg_ms": 0.4035,
+      "median_ms": 0.3261
+    },
+    "validate": {
+      "n": 200,
+      "min_ms": 0.3163,
+      "max_ms": 1.6398,
+      "avg_ms": 0.4051,
+      "median_ms": 0.34
+    },
+    "sign_plus_validate_avg_ms": 0.8086
+  },
+  "block_finality": {
+    "difficulty_bits": 16,
+    "txs_per_block": 5,
+    "mine_time": {
+      "n": 10,
+      "min_ms": 62.1464,
+      "max_ms": 1426.283,
+      "avg_ms": 425.4521,
+      "median_ms": 306.0478
+    },
+    "avg_nonce_iterations": 85947.1
+  },
+  "p2p": {
+    "discovery_latency_s": 0.558,
+    "propagation_latency_s": 0.149,
+    "propagated": true
+  }
+}
