@@ -1,8 +1,11 @@
-import { useConnection } from 'wagmi';
 import { useEffect, useMemo, useState } from 'react';
-import { ThemeProvider, CssBaseline, Container, Box, Typography, type PaletteMode } from '@mui/material';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { ThemeProvider, CssBaseline, Container, type PaletteMode } from '@mui/material';
 import Navbar from './components/Navbar';
-import TicketGrid from './components/TicketGrid';
+import Hero from './components/Hero';
+import WrongNetworkBanner from './components/WrongNetworkBanner';
+import BuyTicketsPage from './pages/BuyTicketsPage';
+import MyTicketsPage from './pages/MyTicketsPage';
 import { createAppTheme } from './theme';
 import { ColorModeContext } from './ColorModeContext';
 
@@ -16,7 +19,6 @@ function getInitialMode(): PaletteMode {
 }
 
 function App() {
-  const { isConnected } = useConnection();
   const [mode, setMode] = useState<PaletteMode>(getInitialMode);
 
   useEffect(() => {
@@ -37,52 +39,20 @@ function App() {
       <ThemeProvider theme={theme}>
         <CssBaseline />
 
-        <Navbar />
+        <BrowserRouter>
+          <Navbar />
+          <WrongNetworkBanner />
+          <Hero />
 
-        <Box
-          component='section'
-          sx={{ textAlign: 'center', pt: { xs: 10, md: 14 }, pb: { xs: 8, md: 10 }, px: 2 }}
-        >
-          <Typography
-            variant='h6'
-            sx={{
-              color: 'primary.main',
-              fontSize: '0.95rem',
-              fontWeight: 600,
-              mb: 1.5,
-            }}
-          >
-            TicketChain
-          </Typography>
-          <Typography
-            variant='h1'
-            sx={{
-              fontSize: { xs: '2.5rem', md: '3.5rem' },
-              color: 'text.primary',
-              mb: 2,
-            }}
-          >
-            Local, peer-to-peer,
-            <br />
-            impossible to scalp.
-          </Typography>
-          <Typography
-            variant='body1'
-            sx={{
-              color: 'text.secondary',
-              fontSize: '1.15rem',
-              maxWidth: 520,
-              mx: 'auto',
-            }}
-          >
-            Every ticket is a verified on-chain asset with a price ceiling
-            built in, sold once, resold at face value, never more.
-          </Typography>
-        </Box>
-
-        <Container maxWidth='lg' sx={{ pb: 12 }}>
-          <TicketGrid isConnected={isConnected} />
-        </Container>
+          <Container maxWidth='lg' sx={{ pb: 12 }}>
+            <Routes>
+              <Route path='/' element={<BuyTicketsPage />} />
+              <Route path='/my-tickets' element={<MyTicketsPage />} />
+              {/* Any unknown path lands on the ticket list rather than a dead end. */}
+              <Route path='*' element={<Navigate to='/' replace />} />
+            </Routes>
+          </Container>
+        </BrowserRouter>
       </ThemeProvider>
     </ColorModeContext.Provider>
   );

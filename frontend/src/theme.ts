@@ -89,3 +89,35 @@ export function mutedSurface(mode: PaletteMode): string {
 export function hoverBorder(mode: PaletteMode): string {
   return mode === 'dark' ? '#4a4a4d' : '#bcbcc0';
 }
+
+/**
+ * The filled primary action — Buy, List. Inverts text/background so it reads as
+ * the one thing to click on a card.
+ *
+ * `isBusy` keeps a disabled button looking active-but-waiting rather than
+ * greyed out: mid-transaction the button is disabled, but the user should see
+ * work in progress, not a dead control.
+ */
+export function filledButtonSx(isDone: boolean, isBusy: boolean) {
+  return {
+    bgcolor: isDone ? 'success.main' : 'text.primary',
+    color: isDone ? 'common.white' : 'background.default',
+    py: 1.1,
+    fontSize: '0.92rem',
+    '&:hover': {
+      bgcolor: isDone ? 'success.main' : 'text.primary',
+      opacity: 0.85,
+    },
+    '&.Mui-disabled': isBusy
+      ? { bgcolor: 'text.primary', color: 'background.default', opacity: 0.5 }
+      : { bgcolor: 'action.disabledBackground', color: 'action.disabled' },
+  } as const;
+}
+
+/** The quieter secondary action — Cancel listing, dismiss. */
+export const outlinedButtonSx = {
+  py: 1.1,
+  fontSize: '0.92rem',
+  color: 'text.primary',
+  borderColor: 'divider',
+} as const;

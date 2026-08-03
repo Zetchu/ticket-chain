@@ -1,0 +1,260 @@
+# Getting Started with TicketChain
+
+A step-by-step guide to running the whole system on your own machine: a local
+Ethereum chain, a peer-to-peer node, and the React app — plus the MetaMask setup
+you need to actually buy and resell a ticket.
+
+Budget about 10 minutes for the first run.
+
+---
+
+## 1. What you're about to run
+
+TicketChain has three parts, and `start_dev.sh` starts all of them together:
+
+| Part | What it is | Where it listens |
+| --- | --- | --- |
+| Hardhat node | A local Ethereum blockchain holding the `TicketNFT` contract | `127.0.0.1:8545` |
+| PyIPv8 node | The P2P network layer + a small HTTP API listing tickets | `127.0.0.1:8080` (UDP `8090` for peers) |
+| React app | The user interface | `localhost:5173` |
+
+Nothing here touches a public network. The chain is local, the peers are local,
+and the ETH is fake.
+
+---
+
+## 2. Prerequisites
+
+You need four things installed.
+
+### Node.js 20 or 22
+
+```bash
+node --version
+```
+
+Hardhat prints a warning on very new Node versions (25+). It still works, but if
+you hit odd errors, install an LTS release via [nvm](https://github.com/nvm-sh/nvm):
+
+```bash
+nvm install 22 && nvm use 22
+```
+
+### Python 3.9+
+
+```bash
+python3 --version
+```
+
+You do **not** need to create a virtualenv yourself — the start script does it.
+
+### libsodium
+
+The P2P library (PyIPv8) needs this native library and cannot start without it.
+
+```bash
+# macOS
+brew install libsodium
+
+# Debian / Ubuntu
+sudo apt install libsodium23
+```
+
+### MetaMask
+
+Install the [MetaMask browser extension](https://metamask.io/download/) and
+create a wallet if you don't have one. The seed phrase doesn't matter here —
+you'll import throwaway test accounts in step 5.
+
+> **Windows:** run everything inside WSL2. The start script is a bash script and
+> expects a Unix shell.
+
+---
+
+## 3. Clone and start
+
+```bash
+git clone https://github.com/Zetchu/ticket-chain.git
+cd ticket-chain
+./start_dev.sh
+```
+
+The first run takes a minute or so because it creates a Python virtualenv and
+installs dependencies. You're looking for this:
+
+```
+🚀 Starting TicketChain Development Environment...
+🐍 Creating Python venv and installing network dependencies...
+📦 Starting local blockchain (logs routing to hardhat.log)...
+⏳ Waiting for JSON-RPC on 127.0.0.1:8545...
+⚙️ Deploying fresh smart contracts...
+TicketNFT deployed to: 0x5FbDB2315678afecb367f032d93F642f64180aa3 (network: localhost)
+Minted 3 ticket(s) (token IDs 0..2) to 0x7099...79C8, each listed at 0.05 ETH
+🌐 Starting P2P Network (logs routing to network.log)...
+💻 Starting React UI...
+
+✅ All systems running! Press CTRL+C to stop.
+👉 Frontend available at: http://localhost:5173
+```
+
+**Ctrl+C stops everything.** Backend output goes to `hardhat.log` and
+`network.log` in the project root — check those first if something looks wrong.
+
+Open <http://localhost:5173>. You should see three ticket cards. They'll say
+"Connect to buy" until you finish the next two steps.
+
+---
+
+## 4. Add the local network to MetaMask
+
+MetaMask talks to Ethereum mainnet by default. Point it at your local chain:
+
+1. Open MetaMask → click the network dropdown (top left) → **Add network**
+2. Choose **Add a network manually**
+3. Fill in:
+
+   | Field | Value |
+   | --- | --- |
+   | Network name | `Hardhat Local` |
+   | New RPC URL | `http://127.0.0.1:8545` |
+   | Chain ID | `31337` |
+   | Currency symbol | `ETH` |
+
+4. Save, then switch to it.
+
+If you forget this step, the app shows a warning banner with a **Switch network**
+button that does it for you.
+
+---
+
+## 5. Import two test accounts
+
+Hardhat creates 20 accounts with 10,000 fake ETH each. You need **two** of them,
+because the contract refuses to let you buy your own ticket.
+
+In MetaMask: account menu → **Add account or hardware wallet** → **Import
+account** → paste the private key.
+
+**Account #0 — the organizer** (deployed the contract):
+
+```
+0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+```
+
+**Account #1 — holds the three starter tickets:**
+
+```
+0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
+```
+
+> ⚠️ These keys are published in Hardhat's documentation and are known to
+> everyone on earth. They are safe for local testing and catastrophic anywhere
+> else. Never send real funds to them.
+
+Back in the app, click **Connect Wallet** and approve the connection.
+
+---
+
+## 6. Buy a ticket
+
+1. Switch MetaMask to **Account #0**.
+2. On **Buy Tickets**, pick any card — they're listed at 0.05 ETH by account #1.
+3. Click **Buy Ticket** and confirm in MetaMask.
+4. The button walks through *Confirm in wallet* → *Processing* → *Purchased*, and
+   the card's owner address changes to yours.
+
+Open **My Tickets** in the nav and it's there.
+
+---
+
+## 7. Resell it
+
+This is the part the whole project exists for.
+
+1. Still on account #0, find your ticket (either page — tickets you own show
+   your controls in both).
+2. Click **List for resale**. The price box opens, pre-filled with the 0.05 ETH
+   face value.
+3. Type `0.03` and click **List ticket**. Confirm in MetaMask.
+4. The card now shows *asking price* 0.03 ETH, with **Change price** and
+   **Unlist** buttons.
+5. Switch MetaMask to **Account #1**. That ticket now shows **Buy Ticket** at
+   0.03 ETH — buy it back.
+
+Try the anti-scalping rule while you're here: open the price box and enter
+`0.06`. The field turns red — "Above the 0.05 ETH face value — that's scalping" —
+and the button won't submit. The contract enforces the same rule independently,
+so it can't be bypassed by editing the page.
+
+---
+
+## 8. Running the pieces separately
+
+`start_dev.sh` is the easy path, but each part runs on its own:
+
+```bash
+# Local blockchain only
+cd contracts && npx hardhat node
+
+# Deploy (and mint the starter tickets) against a running node
+cd contracts && npx hardhat run scripts/deploy.js --network localhost
+
+# P2P node + ticket API
+cd network && .venv/bin/python main.py --seed 3
+
+# Frontend dev server
+cd frontend && npm install && npm run dev
+```
+
+Tests:
+
+```bash
+cd contracts && npx hardhat test                            # smart contract
+cd network && .venv/bin/python -m pytest test_blockchain.py  # blockchain core
+```
+
+---
+
+## Troubleshooting
+
+**"Can't reach the local network" on the tickets page**
+The P2P node isn't running. Check `network.log`. The usual cause is a missing
+libsodium — see step 2.
+
+**`Could not locate nacl lib, searched for libsodium`**
+Install libsodium (step 2), then delete `network/.venv` and re-run
+`./start_dev.sh` so the script re-links it.
+
+**A transaction hangs, or MetaMask reports a nonce error**
+You restarted the chain while MetaMask still remembered the old one. Fix:
+MetaMask → Settings → Advanced → **Clear activity tab data**.
+
+**The app says you're on the wrong network**
+Click **Switch network** in the banner, or select *Hardhat Local* manually.
+
+**`Port 8545 is already in use`**
+A previous run is still alive. Kill it:
+```bash
+pkill -f "hardhat node"; pkill -f vite; pkill -f "main.py"
+```
+
+**Tickets vanished after a restart**
+Expected. Every run of `start_dev.sh` deploys a fresh chain and re-mints three
+starter tickets. Purchases and listings from the previous run are gone.
+
+**`./start_dev.sh: Permission denied`**
+```bash
+chmod +x start_dev.sh
+```
+
+---
+
+## Where to look next
+
+- [`docs/architecture.md`](architecture.md) — how the three layers fit together
+- [`contracts/contracts/TicketNFT.sol`](../contracts/contracts/TicketNFT.sol) — the
+  anti-scalping rules, in about 100 lines
+- [`network/blockchain/`](../network/blockchain/) — the hand-built chain: Merkle
+  trees, proof-of-work, transaction signing
+- [`frontend/src/hooks/useTicketBoard.ts`](../frontend/src/hooks/useTicketBoard.ts) —
+  where the P2P feed and on-chain state get joined together
