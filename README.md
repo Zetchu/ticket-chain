@@ -9,7 +9,7 @@
 - **Khalil**
 - **Mahmoud**
 
-**ticket-chain-ten.vercel.app**
+**ticket-chain-ten.vercel.app** — a landing page for the project. TicketChain is a *localized* network: the blockchain node and the P2P overlay both run on your own machine, so the live demo has to be run locally ([getting-started.md](getting-started.md)).
 
 ## 1\. Project Overview
 

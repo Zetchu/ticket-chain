@@ -25,10 +25,13 @@ API_HOST = "127.0.0.1"
 API_PORT = 8080
 
 # Vite dev server origins allowed to call this API.
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+#
+# Any localhost port is accepted, not just 5173: Vite silently falls back to
+# 5174, 5175, … when its default port is taken, and a hardcoded list turns that
+# into an opaque CORS failure in the browser. The API binds to 127.0.0.1 only
+# (see API_HOST), so "any port on this machine" is the same trust boundary the
+# socket already enforces.
+ALLOWED_ORIGIN_REGEX = r"http://(localhost|127\.0\.0\.1)(:\d+)?"
 
 
 def _tx_to_ticket(tx: Transaction, status: str) -> dict | None:
@@ -73,7 +76,7 @@ def create_app(blockchain: Blockchain) -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=ALLOWED_ORIGINS,
+        allow_origin_regex=ALLOWED_ORIGIN_REGEX,
         allow_methods=["GET"],
         allow_headers=["*"],
     )
