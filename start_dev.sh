@@ -5,10 +5,6 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-# Tickets minted on-chain must match the ticket offerings the P2P node
-# publishes — the frontend calls the contract with the IDs the node hands out.
-SEED_COUNT=3
-
 VENV="$ROOT/network/.venv"
 PIDS=()
 
@@ -74,10 +70,10 @@ if ! nc -z 127.0.0.1 8545 2>/dev/null; then
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Deploy contracts (mints the seed tickets, refreshes the frontend ABI)
+# 2. Deploy contracts (refreshes the frontend ABI)
 # ---------------------------------------------------------------------------
 echo "⚙️ Deploying fresh smart contracts..."
-if ! ( cd contracts && TICKET_SEED_COUNT="$SEED_COUNT" npx hardhat run scripts/deploy.js --network localhost ); then
+if ! ( cd contracts && npx hardhat run scripts/deploy.js --network localhost ); then
   echo "❌ Deployment failed — see the output above"
   cleanup
 fi
@@ -86,7 +82,7 @@ fi
 # 3. P2P node + HTTP API
 # ---------------------------------------------------------------------------
 echo "🌐 Starting P2P Network (logs routing to network.log)..."
-( cd network && exec "$VENV/bin/python" main.py --seed "$SEED_COUNT" ) > network.log 2>&1 &
+( cd network && exec "$VENV/bin/python" main.py ) > network.log 2>&1 &
 PIDS+=($!)
 
 # ---------------------------------------------------------------------------
