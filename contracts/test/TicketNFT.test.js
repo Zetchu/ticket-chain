@@ -3,6 +3,10 @@ const { loadFixture } = require("@nomicfoundation/hardhat-toolbox/network-helper
 const { ethers } = require("hardhat");
 
 describe("TicketNFT", function () {
+  // Event details every mintAndList test issues its batch under.
+  const EVENT_NAME = "Sunset Festival";
+  const EVENT_DATE = 1893456000; // 2030-01-01T00:00:00Z
+
   async function deployFixture() {
     const [organizer, alice, bob] = await ethers.getSigners();
     const TicketNFT = await ethers.getContractFactory("TicketNFT");
@@ -35,7 +39,7 @@ describe("TicketNFT", function () {
       const { ticket, alice } = await loadFixture(deployFixture);
       await ticket.mintTicket(alice.address);
       expect(await ticket.totalMinted()).to.equal(1);
-      await ticket.mintAndList(3);
+      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE);
       expect(await ticket.totalMinted()).to.equal(4);
     });
   });
@@ -45,7 +49,7 @@ describe("TicketNFT", function () {
       const { ticket, organizer } = await loadFixture(deployFixture);
       const price = await ticket.FACE_VALUE();
 
-      await ticket.mintAndList(2);
+      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE);
 
       expect(await ticket.ownerOf(0)).to.equal(organizer.address);
       expect(await ticket.ownerOf(1)).to.equal(organizer.address);
@@ -63,27 +67,88 @@ describe("TicketNFT", function () {
       const { ticket, organizer } = await loadFixture(deployFixture);
       const price = await ticket.FACE_VALUE();
 
-      await expect(ticket.mintAndList(1))
+      await expect(ticket.mintAndList(1, EVENT_NAME, EVENT_DATE))
         .to.emit(ticket, "TicketMinted").withArgs(organizer.address, 0, price)
         .and.to.emit(ticket, "TicketListed").withArgs(0, organizer.address, price);
     });
 
     it("reverts when called by a non-organizer", async function () {
       const { ticket, alice } = await loadFixture(deployFixture);
-      await expect(ticket.connect(alice).mintAndList(1))
+      await expect(ticket.connect(alice).mintAndList(1, EVENT_NAME, EVENT_DATE))
         .to.be.revertedWithCustomError(ticket, "OwnableUnauthorizedAccount");
     });
 
     it("reverts with quantity 0", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await expect(ticket.mintAndList(0))
+      await expect(ticket.mintAndList(0, EVENT_NAME, EVENT_DATE))
         .to.be.revertedWith("Quantity must be at least 1");
+    });
+
+    it("stores the event name and date against every ticket in the batch", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE);
+
+      for (const tokenId of [0, 1, 2]) {
+        const [name, date] = await ticket.getTicketEvent(tokenId);
+        expect(name).to.equal(EVENT_NAME);
+        expect(date).to.equal(EVENT_DATE);
+      }
+    });
+
+    it("emits EventCreated once per batch, not once per ticket", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      const tx = await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE);
+      const receipt = await tx.wait();
+
+      const created = receipt.logs.filter(
+        (log) => log.fragment && log.fragment.name === "EventCreated"
+      );
+      expect(created.length).to.equal(1);
+      // Event 0 is the constructor's fallback, so the first batch is event 1.
+      expect(created[0].args.eventId).to.equal(1);
+      expect(created[0].args.name).to.equal(EVENT_NAME);
+      expect(created[0].args.date).to.equal(EVENT_DATE);
+    });
+
+    it("keeps separate batches on separate events", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE);
+      await ticket.mintAndList(1, "Jazz Night", EVENT_DATE + 86400);
+
+      const [firstName] = await ticket.getTicketEvent(0);
+      const [secondName, secondDate] = await ticket.getTicketEvent(1);
+      expect(firstName).to.equal(EVENT_NAME);
+      expect(secondName).to.equal("Jazz Night");
+      expect(secondDate).to.equal(EVENT_DATE + 86400);
+    });
+
+    it("reverts without an event name", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await expect(ticket.mintAndList(1, "", EVENT_DATE))
+        .to.be.revertedWith("Event name is required");
+    });
+
+    it("reverts without an event date", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await expect(ticket.mintAndList(1, EVENT_NAME, 0))
+        .to.be.revertedWith("Event date is required");
+    });
+
+    it("carries the event with the ticket through a resale", async function () {
+      const { ticket, bob } = await loadFixture(deployFixture);
+      const price = await ticket.FACE_VALUE();
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE);
+      await ticket.connect(bob).resaleTransfer(0, { value: price });
+
+      const [name, date] = await ticket.getTicketEvent(0);
+      expect(name).to.equal(EVENT_NAME);
+      expect(date).to.equal(EVENT_DATE);
     });
 
     it("minted tickets are purchasable at face value — ETH goes to the organizer", async function () {
       const { ticket, organizer, bob } = await loadFixture(deployFixture);
       const price = await ticket.FACE_VALUE();
-      await ticket.mintAndList(1);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE);
 
       await expect(
         ticket.connect(bob).resaleTransfer(0, { value: price })
@@ -130,6 +195,21 @@ describe("TicketNFT", function () {
       const { ticket } = await loadFixture(deployFixture);
       await expect(ticket.mintTicket(ethers.ZeroAddress))
         .to.be.revertedWithCustomError(ticket, "ERC721InvalidReceiver");
+    });
+  });
+
+  describe("getTicketEvent", function () {
+    it("falls back to the default event for tickets from mintTicket", async function () {
+      const { ticket } = await loadFixture(mintedFixture);
+      const [name, date] = await ticket.getTicketEvent(0);
+      expect(name).to.equal("General Admission");
+      expect(date).to.equal(0);
+    });
+
+    it("reverts for a nonexistent ticket", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await expect(ticket.getTicketEvent(99))
+        .to.be.revertedWithCustomError(ticket, "ERC721NonexistentToken");
     });
   });
 

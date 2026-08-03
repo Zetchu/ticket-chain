@@ -14,6 +14,17 @@ contract TicketNFT is ERC721, Ownable {
     struct Ticket {
         uint256 faceValue;
         bool isResellable;
+        /// @dev Which event this ticket admits to — an index into `eventDetails`.
+        uint256 eventId;
+    }
+
+    /// @notice What a ticket is actually for: the event's name and start time.
+    /// @dev Held once per event rather than per ticket — a 500-seat show would
+    ///      otherwise store the same string 500 times.
+    struct EventDetails {
+        string name;
+        /// @dev Unix timestamp (seconds) of the event start; 0 when unset.
+        uint256 date;
     }
 
     /// @notice An owner's standing offer to sell a ticket at `price`.
@@ -28,9 +39,13 @@ contract TicketNFT is ERC721, Ownable {
     uint256 public constant FACE_VALUE = 0.05 ether;
 
     uint256 private _nextTokenId;
+    uint256 private _nextEventId;
 
     /// @notice Ticket metadata per token ID.
     mapping(uint256 tokenId => Ticket) public tickets;
+
+    /// @notice Event name and date per event ID.
+    mapping(uint256 eventId => EventDetails) public eventDetails;
 
     /// @notice Active resale offers per token ID.
     mapping(uint256 tokenId => Listing) public listings;
@@ -40,6 +55,7 @@ contract TicketNFT is ERC721, Ownable {
     ///      blocked — an off-chain scalper deal would bypass the price check).
     bool private _inResale;
 
+    event EventCreated(uint256 indexed eventId, string name, uint256 date);
     event TicketMinted(address indexed to, uint256 indexed tokenId, uint256 faceValue);
     event TicketListed(uint256 indexed tokenId, address indexed seller, uint256 price);
     event TicketUnlisted(uint256 indexed tokenId, address indexed seller);
@@ -50,30 +66,74 @@ contract TicketNFT is ERC721, Ownable {
         uint256 price
     );
 
-    constructor() ERC721("TicketChain Event Ticket", "TCKT") Ownable(msg.sender) {}
-
-    /// @notice Issue a new resellable ticket to `to` at the hard-coded face value.
-    function mintTicket(address to) external onlyOwner returns (uint256 tokenId) {
-        tokenId = _nextTokenId++;
-        tickets[tokenId] = Ticket({faceValue: FACE_VALUE, isResellable: true});
-        _safeMint(to, tokenId);
-        emit TicketMinted(to, tokenId, FACE_VALUE);
+    constructor() ERC721("TicketChain Event Ticket", "TCKT") Ownable(msg.sender) {
+        // Event 0 is the fallback for tickets issued with mintTicket(), which
+        // carries no event of its own.
+        _nextEventId = 1;
+        eventDetails[0] = EventDetails({name: "General Admission", date: 0});
+        emit EventCreated(0, "General Admission", 0);
     }
 
-    /// @notice Mint `quantity` tickets to the organizer and list each at face
-    ///         value so they are immediately available for purchase.
+    /// @notice Issue a new resellable ticket to `to` at the hard-coded face value.
+    /// @dev Assigned to event 0 ("General Admission"); use mintAndList to issue
+    ///      tickets for a named event.
+    function mintTicket(address to) external onlyOwner returns (uint256 tokenId) {
+        tokenId = _mintOne(to, 0);
+    }
+
+    /// @notice Mint `quantity` tickets for a named event, to the organizer, and
+    ///         list each at face value so they are immediately purchasable.
+    /// @param quantity  How many tickets to issue.
+    /// @param name      Event name shown on every ticket in the batch.
+    /// @param date      Event start as a Unix timestamp (seconds).
     /// @dev The primary sale flows through resaleTransfer — one payment code
     ///      path, price ceiling enforced on first sale just like any resale.
-    function mintAndList(uint256 quantity) external onlyOwner {
+    ///      Each call creates one event, so two batches are two events even if
+    ///      the details match.
+    function mintAndList(uint256 quantity, string calldata name, uint256 date)
+        external
+        onlyOwner
+        returns (uint256 eventId)
+    {
         require(quantity > 0, "Quantity must be at least 1");
+        require(bytes(name).length > 0, "Event name is required");
+        require(date > 0, "Event date is required");
+
+        eventId = _nextEventId++;
+        eventDetails[eventId] = EventDetails({name: name, date: date});
+        emit EventCreated(eventId, name, date);
+
         for (uint256 i = 0; i < quantity; i++) {
-            uint256 tokenId = _nextTokenId++;
-            tickets[tokenId] = Ticket({faceValue: FACE_VALUE, isResellable: true});
-            _safeMint(msg.sender, tokenId);
-            emit TicketMinted(msg.sender, tokenId, FACE_VALUE);
+            uint256 tokenId = _mintOne(msg.sender, eventId);
             listings[tokenId] = Listing({price: FACE_VALUE, active: true});
             emit TicketListed(tokenId, msg.sender, FACE_VALUE);
         }
+    }
+
+    /// @notice Name and date of the event a ticket admits to.
+    /// @dev One call per ticket for the frontend, instead of reading the token's
+    ///      event ID and then looking the event up separately.
+    function getTicketEvent(uint256 tokenId)
+        external
+        view
+        returns (string memory name, uint256 date)
+    {
+        _requireOwned(tokenId);
+        EventDetails storage details = eventDetails[tickets[tokenId].eventId];
+        return (details.name, details.date);
+    }
+
+    /// @dev Issue one ticket for `eventId` at face value. Shared by both mint
+    ///      entry points so the ticket record is built in exactly one place.
+    function _mintOne(address to, uint256 eventId) private returns (uint256 tokenId) {
+        tokenId = _nextTokenId++;
+        tickets[tokenId] = Ticket({
+            faceValue: FACE_VALUE,
+            isResellable: true,
+            eventId: eventId
+        });
+        _safeMint(to, tokenId);
+        emit TicketMinted(to, tokenId, FACE_VALUE);
     }
 
     /// @notice Total number of tickets minted so far (equals the next token ID).

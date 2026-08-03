@@ -40,13 +40,18 @@ you hit odd errors, install an LTS release via [nvm](https://github.com/nvm-sh/n
 nvm install 22 && nvm use 22
 ```
 
-### Python 3.9+
+### Python 3.10+
 
 ```bash
 python3 --version
 ```
 
-You do **not** need to create a virtualenv yourself — the start script does it.
+PyIPv8 3.x requires 3.10 or newer. macOS ships 3.9 as the system `python3`, so
+if that's what you see, install a newer one (`brew install python@3.12`) — the
+start script will find and use it automatically.
+
+You do **not** need to create a virtualenv yourself — the start script does it,
+and rebuilds it if the dependencies or the Python version change.
 
 ### libsodium
 

@@ -21,8 +21,10 @@ export default function OrganizerPage() {
   const navigate = useNavigate();
   const { address, isConnected } = useConnection();
   const [quantity, setQuantity] = useState(1);
+  const [eventName, setEventName] = useState('');
+  const [eventDate, setEventDate] = useState('');
 
-  const { owned, faceValue, totalMinted, owner, isPending, refresh } = useTicketBoard();
+  const { all, owned, faceValue, totalMinted, owner, isPending, refresh } = useTicketBoard();
 
   const { action, submit, isBusy, isConfirmed, error, hash, isFeedbackOpen, closeFeedback } =
     useTicketWrite(refresh);
@@ -38,16 +40,28 @@ export default function OrganizerPage() {
 
   if (!isConnected || !isOrganizer) return null;
 
-  const heldCount = owned.length;
   const listedCount = owned.filter((e) => e.listing?.active).length;
-  const soldCount = totalMinted - heldCount;
+
+  // Counted from on-chain owners rather than `totalMinted - held`: tickets
+  // issued straight to an attendee with mintTicket() were never held by the
+  // organizer, and buying one back would otherwise push the count negative.
+  const soldCount = all.filter(
+    (e) => e.owner !== undefined && !isSameAddress(e.owner, owner),
+  ).length;
+
+  // datetime-local gives a local wall-clock string; the contract stores Unix
+  // seconds, so it is converted once here at the boundary.
+  const eventDateSeconds = eventDate ? Math.floor(new Date(eventDate).getTime() / 1000) : 0;
+  const canMint =
+    eventName.trim().length > 0 && eventDateSeconds > 0 && quantity > 0 && !isBusy;
 
   const handleMint = () => {
+    if (!canMint) return;
     submit('mint', {
       address: ticketAddress,
       abi: ticketAbi,
       functionName: 'mintAndList',
-      args: [BigInt(quantity)],
+      args: [BigInt(quantity), eventName.trim(), BigInt(eventDateSeconds)],
     });
   };
 
@@ -71,7 +85,7 @@ export default function OrganizerPage() {
       >
         <StatBox label='Total minted' value={totalMinted} />
         <StatBox label='Available' value={listedCount} description='listed by you' />
-        <StatBox label='Sold' value={soldCount} description='transferred out' />
+        <StatBox label='Sold' value={soldCount} description='held by others' />
       </Box>
 
       <Divider sx={{ mb: 4 }} />
@@ -83,11 +97,38 @@ export default function OrganizerPage() {
         Mint & List Tickets
       </Typography>
       <Typography sx={{ fontSize: '0.9rem', color: 'text.secondary', mb: 3, maxWidth: 480 }}>
-        Each ticket is minted to your wallet and immediately listed at {faceValueLabel}. Buyers
-        can purchase them from the Buy Tickets page — payment goes directly to you.
+        Every ticket in a batch carries the event name and date you enter here, and is minted to
+        your wallet and listed at {faceValueLabel}. Buyers can purchase them from the Buy Tickets
+        page — payment goes directly to you.
       </Typography>
 
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+      <Box
+        component='form'
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleMint();
+        }}
+        sx={{ display: 'flex', gap: 2, alignItems: 'flex-start', flexWrap: 'wrap', maxWidth: 720 }}
+      >
+        <TextField
+          label='Event name'
+          size='small'
+          required
+          value={eventName}
+          onChange={(e) => setEventName(e.target.value)}
+          placeholder='Sunset Festival'
+          sx={{ flex: '1 1 220px', minWidth: 200 }}
+        />
+        <TextField
+          label='Event date'
+          type='datetime-local'
+          size='small'
+          required
+          value={eventDate}
+          onChange={(e) => setEventDate(e.target.value)}
+          slotProps={{ inputLabel: { shrink: true } }}
+          sx={{ flex: '0 1 220px' }}
+        />
         <TextField
           label='Quantity'
           type='number'
@@ -97,20 +138,22 @@ export default function OrganizerPage() {
             const v = parseInt(e.target.value, 10);
             if (!isNaN(v)) setQuantity(Math.max(1, Math.min(50, v)));
           }}
+          // MUI v9 removed the legacy `InputProps`/`inputProps` props: the
+          // `input` slot is the outer Input component (adornments live here),
+          // `htmlInput` is the native <input> (min/max live there).
           slotProps={{
-            input: { inputProps: { min: 1, max: 50 } },
+            input: {
+              endAdornment: <InputAdornment position='end'>tickets</InputAdornment>,
+            },
             htmlInput: { min: 1, max: 50 },
           }}
-          sx={{ width: 130 }}
-          InputProps={{
-            endAdornment: <InputAdornment position='end'>tickets</InputAdornment>,
-          }}
+          sx={{ width: 150 }}
         />
         <Button
+          type='submit'
           variant='contained'
           disableElevation
-          onClick={handleMint}
-          disabled={isBusy}
+          disabled={!canMint}
           sx={{
             bgcolor: 'text.primary',
             color: 'background.default',

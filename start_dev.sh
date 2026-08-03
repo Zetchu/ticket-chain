@@ -27,11 +27,54 @@ trap cleanup INT TERM
 # ---------------------------------------------------------------------------
 # 0. Python environment for the P2P node
 # ---------------------------------------------------------------------------
+REQUIREMENTS="$ROOT/network/requirements.txt"
+# Written after a successful install so its timestamp records which version of
+# requirements.txt the venv actually holds.
+INSTALL_MARKER="$VENV/.requirements-installed"
+
+# pyipv8 3.x imports typing.Concatenate, so it needs Python 3.10 or newer.
+# On macOS `python3` is often Apple's 3.9, which would build a venv the node
+# cannot run in — so search for a usable interpreter rather than assuming.
+MIN_MINOR=10
+supports_ipv8() {
+  "$1" -c "import sys; sys.exit(0 if sys.version_info >= (3, $MIN_MINOR) else 1)" 2>/dev/null
+}
+
+PYTHON=''
+for candidate in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+  if command -v "$candidate" >/dev/null 2>&1 && supports_ipv8 "$candidate"; then
+    PYTHON="$candidate"
+    break
+  fi
+done
+
+if [ -z "$PYTHON" ]; then
+  echo "❌ Python 3.$MIN_MINOR+ is required (pyipv8 3.x)."
+  echo "   Found: $(python3 --version 2>&1). Install a newer one, e.g.:"
+  echo "     brew install python@3.12        # macOS"
+  echo "     sudo apt install python3.12      # Debian/Ubuntu"
+  exit 1
+fi
+
+# An existing venv built on an older interpreter can't be upgraded in place.
+if [ -x "$VENV/bin/python" ] && ! supports_ipv8 "$VENV/bin/python"; then
+  echo "♻️  Rebuilding venv on $("$PYTHON" --version 2>&1) (was $("$VENV/bin/python" --version 2>&1))..."
+  rm -rf "$VENV"
+fi
+
 if [ ! -d "$VENV" ]; then
-  echo "🐍 Creating Python venv and installing network dependencies..."
-  python3 -m venv "$VENV" || exit 1
+  echo "🐍 Creating Python venv with $PYTHON..."
+  "$PYTHON" -m venv "$VENV" || exit 1
+fi
+
+# Reinstall whenever requirements.txt has moved on. Checking only for the
+# venv's existence would leave anyone who ran this before a dependency bump
+# silently pinned to the old versions.
+if [ ! -f "$INSTALL_MARKER" ] || [ "$REQUIREMENTS" -nt "$INSTALL_MARKER" ]; then
+  echo "🐍 Installing network dependencies..."
   "$VENV/bin/pip" install --quiet --upgrade pip
-  "$VENV/bin/pip" install --quiet -r network/requirements.txt || exit 1
+  "$VENV/bin/pip" install --quiet -r "$REQUIREMENTS" || exit 1
+  touch "$INSTALL_MARKER"
 fi
 
 # pyipv8 loads libsodium through libnacl, which on macOS looks in the dyld
@@ -82,7 +125,9 @@ fi
 # 3. P2P node + HTTP API
 # ---------------------------------------------------------------------------
 echo "🌐 Starting P2P Network (logs routing to network.log)..."
-( cd network && exec "$VENV/bin/python" main.py ) > network.log 2>&1 &
+# -u keeps stdout unbuffered: without it Python holds ~8KB back, so network.log
+# stays empty (or stale) for most of a session and `tail -f` shows nothing.
+( cd network && exec "$VENV/bin/python" -u main.py ) > network.log 2>&1 &
 PIDS+=($!)
 
 # ---------------------------------------------------------------------------

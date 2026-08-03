@@ -42,6 +42,20 @@ async function fetchP2PTickets(): Promise<Ticket[]> {
   return response.json();
 }
 
+/**
+ * Render an on-chain event date (Unix seconds) for a ticket card.
+ *
+ * Returns undefined for 0, which is what tickets issued through `mintTicket`
+ * carry — they belong to the contract's default event and have no date.
+ */
+function formatEventDate(timestamp: bigint): string | undefined {
+  if (timestamp === 0n) return undefined;
+  return new Date(Number(timestamp) * 1000).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
 function syntheticTicket(id: number): Ticket {
   return {
     id,
@@ -139,6 +153,12 @@ export function useTicketBoard() {
           functionName: 'listings',
           args: [BigInt(id)],
         },
+        {
+          address: ticketAddress,
+          abi: ticketAbi,
+          functionName: 'getTicketEvent',
+          args: [BigInt(id)],
+        },
       ]),
     ],
     query: { enabled: chainTokenIds.length > 0 },
@@ -152,9 +172,11 @@ export function useTicketBoard() {
   const boardTickets = useMemo<BoardTicket[]>(
     () =>
       mergedTickets.map((ticket, index) => {
-        // Offset by one for the FACE_VALUE read at the head of the batch.
-        const ownerResult = chainData?.[1 + index * 2];
-        const listingResult = chainData?.[2 + index * 2];
+        // Three reads per token, offset by one for FACE_VALUE at the head.
+        const base = 1 + index * 3;
+        const ownerResult = chainData?.[base];
+        const listingResult = chainData?.[base + 1];
+        const eventResult = chainData?.[base + 2];
 
         const listingTuple =
           listingResult?.status === 'success'
@@ -166,8 +188,21 @@ export function useTicketBoard() {
             ? (ownerResult.result as string)
             : undefined;
 
+        // The event the organizer named at mint time is the authoritative
+        // title and date; the P2P feed's version is only a fallback.
+        const eventTuple =
+          eventResult?.status === 'success'
+            ? (eventResult.result as readonly [string, bigint])
+            : undefined;
+
         return {
-          ticket,
+          ticket: eventTuple
+            ? {
+                ...ticket,
+                title: eventTuple[0] || ticket.title,
+                date: formatEventDate(eventTuple[1]) ?? ticket.date,
+              }
+            : ticket,
           owner: tokenOwner,
           listing: listingTuple
             ? { price: listingTuple[0], active: listingTuple[1] }
@@ -203,6 +238,8 @@ export function useTicketBoard() {
   }, [refetchTotalMinted, refetchChain, refetchFeed]);
 
   return {
+    /** Every minted ticket, unfiltered — for counting across all holders. */
+    all: boardTickets,
     /** Every ticket on the network, listed first — the Buy Tickets page. */
     market,
     /** Tickets held by the connected wallet — the My Tickets page. */
