@@ -25,6 +25,75 @@ describe("TicketNFT", function () {
     return { ...state, price };
   }
 
+  describe("totalMinted", function () {
+    it("returns 0 on a fresh deploy", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      expect(await ticket.totalMinted()).to.equal(0);
+    });
+
+    it("increments after mintTicket and mintAndList", async function () {
+      const { ticket, alice } = await loadFixture(deployFixture);
+      await ticket.mintTicket(alice.address);
+      expect(await ticket.totalMinted()).to.equal(1);
+      await ticket.mintAndList(3);
+      expect(await ticket.totalMinted()).to.equal(4);
+    });
+  });
+
+  describe("mintAndList (primary market)", function () {
+    it("mints to the organizer and lists each ticket at face value", async function () {
+      const { ticket, organizer } = await loadFixture(deployFixture);
+      const price = await ticket.FACE_VALUE();
+
+      await ticket.mintAndList(2);
+
+      expect(await ticket.ownerOf(0)).to.equal(organizer.address);
+      expect(await ticket.ownerOf(1)).to.equal(organizer.address);
+
+      const [p0, a0] = await ticket.listings(0);
+      expect(p0).to.equal(price);
+      expect(a0).to.equal(true);
+
+      const [p1, a1] = await ticket.listings(1);
+      expect(p1).to.equal(price);
+      expect(a1).to.equal(true);
+    });
+
+    it("emits TicketMinted and TicketListed for each token", async function () {
+      const { ticket, organizer } = await loadFixture(deployFixture);
+      const price = await ticket.FACE_VALUE();
+
+      await expect(ticket.mintAndList(1))
+        .to.emit(ticket, "TicketMinted").withArgs(organizer.address, 0, price)
+        .and.to.emit(ticket, "TicketListed").withArgs(0, organizer.address, price);
+    });
+
+    it("reverts when called by a non-organizer", async function () {
+      const { ticket, alice } = await loadFixture(deployFixture);
+      await expect(ticket.connect(alice).mintAndList(1))
+        .to.be.revertedWithCustomError(ticket, "OwnableUnauthorizedAccount");
+    });
+
+    it("reverts with quantity 0", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await expect(ticket.mintAndList(0))
+        .to.be.revertedWith("Quantity must be at least 1");
+    });
+
+    it("minted tickets are purchasable at face value — ETH goes to the organizer", async function () {
+      const { ticket, organizer, bob } = await loadFixture(deployFixture);
+      const price = await ticket.FACE_VALUE();
+      await ticket.mintAndList(1);
+
+      await expect(
+        ticket.connect(bob).resaleTransfer(0, { value: price })
+      ).to.changeEtherBalances([bob, organizer], [-price, price]);
+
+      expect(await ticket.ownerOf(0)).to.equal(bob.address);
+      expect((await ticket.listings(0)).active).to.equal(false);
+    });
+  });
+
   describe("Minting", function () {
     it("lets the organizer mint a ticket to an attendee", async function () {
       const { ticket, alice } = await loadFixture(deployFixture);
