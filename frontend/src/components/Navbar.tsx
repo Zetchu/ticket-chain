@@ -1,13 +1,14 @@
 // src/components/Navbar.tsx
-import { useConnection, useConnect, useDisconnect, useConnectors } from 'wagmi';
+import { useConnection, useConnect, useDisconnect, useConnectors, useReadContract } from 'wagmi';
 import { AppBar, Toolbar, Typography, Button, IconButton, Box } from '@mui/material';
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
 import { NavLink, Link as RouterLink } from 'react-router-dom';
 import { useColorMode } from '../ColorModeContext';
-import { truncateAddress } from '../lib/format';
+import { truncateAddress, isSameAddress } from '../lib/format';
+import { ticketAddress, ticketAbi } from '../contracts/ticketNFT';
 
-const PAGES = [
+const BASE_PAGES = [
   { to: '/', label: 'Buy Tickets' },
   { to: '/my-tickets', label: 'My Tickets' },
 ] as const;
@@ -18,6 +19,17 @@ export default function Navbar() {
   const { isConnected, address } = useConnection();
   const { mutate: disconnect } = useDisconnect();
   const { mode, toggleMode } = useColorMode();
+
+  const { data: contractOwner } = useReadContract({
+    address: ticketAddress,
+    abi: ticketAbi,
+    functionName: 'owner',
+  });
+
+  const isOrganizer = isSameAddress(address, contractOwner as string | undefined);
+  const pages = isOrganizer
+    ? [...BASE_PAGES, { to: '/organizer', label: 'Organizer' }]
+    : BASE_PAGES;
 
   const metaMaskConnector = connectors.find(
     (c) => c.id === 'injected' || c.name === 'MetaMask',
@@ -62,7 +74,7 @@ export default function Navbar() {
           </Typography>
 
           <Box component='nav' sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1.5, sm: 2.5 } }}>
-            {PAGES.map((page) => (
+            {pages.map((page) => (
               <NavLink key={page.to} to={page.to} end style={{ textDecoration: 'none' }}>
                 {({ isActive }) => (
                   <Typography

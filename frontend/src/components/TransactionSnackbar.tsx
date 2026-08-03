@@ -7,6 +7,7 @@ const ACTION_NOUN: Record<TicketAction, string> = {
   buy: 'Purchase',
   list: 'Listing',
   cancel: 'Cancellation',
+  mint: 'Minting',
 };
 
 /** Transaction feedback: pending, reverted, or confirmed with the tx hash. */

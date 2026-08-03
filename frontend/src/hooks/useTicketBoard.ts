@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useConnection, useReadContracts } from 'wagmi';
+import { useConnection, useReadContract, useReadContracts } from 'wagmi';
 import { ticketAbi, ticketAddress, type Listing } from '../contracts/ticketNFT';
 import { isSameAddress } from '../lib/format';
 
@@ -42,17 +42,52 @@ async function fetchP2PTickets(): Promise<Ticket[]> {
   return response.json();
 }
 
+function syntheticTicket(id: number): Ticket {
+  return {
+    id,
+    type: 'Confirmed',
+    price: '0',
+    title: `Ticket #${id}`,
+    location: 'Local P2P Network',
+    date: '—',
+  };
+}
+
 /**
- * The shared read model behind both pages: the P2P ticket feed joined with each
- * token's on-chain owner and listing, split by whether the connected wallet
- * holds it.
+ * The shared read model behind all pages: chain-enumerated token IDs enriched
+ * with P2P metadata, joined with each token's on-chain owner and listing.
  *
- * Both pages call this. React Query and wagmi cache by key, so mounting it
- * twice costs no extra requests, and a purchase made on one page is reflected
- * on the other as soon as `refresh` runs.
+ * Token IDs come from totalMinted() — the chain is the authoritative source.
+ * The P2P feed supplies supplementary metadata (title, date) when available.
+ * This means newly minted tickets appear immediately in the UI without waiting
+ * for the P2P node to pick them up.
  */
 export function useTicketBoard() {
   const { address } = useConnection();
+
+  // totalMinted drives the token enumeration — chain is source of truth.
+  const { data: totalMintedRaw, isPending: isTotalMintedPending, refetch: refetchTotalMinted } =
+    useReadContract({
+      address: ticketAddress,
+      abi: ticketAbi,
+      functionName: 'totalMinted',
+    });
+
+  // owner() lets callers detect the organizer without a separate read.
+  const { data: ownerRaw } = useReadContract({
+    address: ticketAddress,
+    abi: ticketAbi,
+    functionName: 'owner',
+  });
+
+  const totalMinted = Number(totalMintedRaw ?? 0);
+  const owner = ownerRaw as string | undefined;
+
+  // All token IDs that exist on-chain: 0..totalMinted-1.
+  const chainTokenIds = useMemo(
+    () => Array.from({ length: totalMinted }, (_, i) => i),
+    [totalMinted],
+  );
 
   const {
     data: tickets,
@@ -63,15 +98,14 @@ export function useTicketBoard() {
   } = useQuery({
     queryKey: ['p2pTickets'],
     queryFn: fetchP2PTickets,
-    retry: isLocalHost ? 2 : 0, // no point retrying a fetch that can't ever resolve
-    // The node mines new offerings while the page is open.
+    retry: isLocalHost ? 2 : 0,
     refetchInterval: isLocalHost ? 15_000 : false,
   });
 
-  // The feed lists a token once per transaction, so the same ticket can appear
-  // as both mined and pending. Show each token once, preferring the confirmed
-  // row — two identical cards is a bug, not information.
-  const uniqueTickets = useMemo(() => {
+  // Merge: chain IDs are authoritative; P2P entries enrich with metadata.
+  // For a token not yet in the feed, synthesize a minimal Ticket so it still
+  // renders as soon as it appears on-chain (e.g. right after mintAndList).
+  const mergedTickets = useMemo<Ticket[]>(() => {
     const byId = new Map<number, Ticket>();
     for (const ticket of tickets ?? []) {
       const existing = byId.get(ticket.id);
@@ -79,16 +113,11 @@ export function useTicketBoard() {
         byId.set(ticket.id, ticket);
       }
     }
-    return [...byId.values()].sort((a, b) => a.id - b.id);
-  }, [tickets]);
+    return chainTokenIds.map((id) => byId.get(id) ?? syntheticTicket(id));
+  }, [chainTokenIds, tickets]);
 
-  const tokenIds = useMemo(
-    () => uniqueTickets.map((ticket) => ticket.id),
-    [uniqueTickets],
-  );
-
-  // One batch of reads for the whole board: the face value (a constant, read
-  // once) plus each token's owner and listing.
+  // One batch of reads for the whole board: face value plus each token's owner
+  // and listing. Keyed on chainTokenIds so it re-fetches when totalMinted grows.
   const {
     data: chainData,
     isPending: isChainPending,
@@ -97,7 +126,7 @@ export function useTicketBoard() {
     allowFailure: true,
     contracts: [
       { address: ticketAddress, abi: ticketAbi, functionName: 'FACE_VALUE' },
-      ...tokenIds.flatMap((id) => [
+      ...chainTokenIds.flatMap((id) => [
         {
           address: ticketAddress,
           abi: ticketAbi,
@@ -112,7 +141,7 @@ export function useTicketBoard() {
         },
       ]),
     ],
-    query: { enabled: tokenIds.length > 0 },
+    query: { enabled: chainTokenIds.length > 0 },
   });
 
   const faceValue =
@@ -122,7 +151,7 @@ export function useTicketBoard() {
 
   const boardTickets = useMemo<BoardTicket[]>(
     () =>
-      uniqueTickets.map((ticket, index) => {
+      mergedTickets.map((ticket, index) => {
         // Offset by one for the FACE_VALUE read at the head of the batch.
         const ownerResult = chainData?.[1 + index * 2];
         const listingResult = chainData?.[2 + index * 2];
@@ -132,28 +161,24 @@ export function useTicketBoard() {
             ? (listingResult.result as readonly [bigint, boolean])
             : undefined;
 
-        const owner =
+        const tokenOwner =
           ownerResult?.status === 'success'
             ? (ownerResult.result as string)
             : undefined;
 
         return {
           ticket,
-          owner,
+          owner: tokenOwner,
           listing: listingTuple
             ? { price: listingTuple[0], active: listingTuple[1] }
             : undefined,
-          isOwnedByViewer: isSameAddress(owner, address),
+          isOwnedByViewer: isSameAddress(tokenOwner, address),
         };
       }),
-    [uniqueTickets, chainData, address],
+    [mergedTickets, chainData, address],
   );
 
-  // The market view, listed tickets first since those are what a visitor can
-  // act on. Your own tickets appear here only once you have listed them: an
-  // unlisted ticket is not on the market, so it belongs on My Tickets alone.
-  // Someone else's unlisted ticket still shows, marked "Not for sale" — it is
-  // part of the network's inventory, just not for sale today.
+  // Listed tickets first; own unlisted tickets appear only on My Tickets.
   const market = useMemo(
     () =>
       boardTickets
@@ -172,9 +197,10 @@ export function useTicketBoard() {
   );
 
   const refresh = useCallback(() => {
+    refetchTotalMinted();
     refetchChain();
     refetchFeed();
-  }, [refetchChain, refetchFeed]);
+  }, [refetchTotalMinted, refetchChain, refetchFeed]);
 
   return {
     /** Every ticket on the network, listed first — the Buy Tickets page. */
@@ -182,7 +208,11 @@ export function useTicketBoard() {
     /** Tickets held by the connected wallet — the My Tickets page. */
     owned,
     faceValue,
-    isPending: isFeedPending || (tokenIds.length > 0 && isChainPending),
+    /** Total tickets minted so far (next token ID). */
+    totalMinted,
+    /** Contract owner address — use to detect the organizer wallet. */
+    owner,
+    isPending: isTotalMintedPending || isFeedPending || (chainTokenIds.length > 0 && isChainPending),
     isError: isFeedError,
     error: feedError,
     refresh,
