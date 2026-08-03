@@ -17,7 +17,7 @@ This project presents a decentralized, localized peer-to-peer event ticketing ne
 
 Why is this project great? It bridges a standard React user interface with a robust backend to solve a real-world problem: preventing malicious secondary markets for high-demand events, ensuring fairness and transparency for attendees.
 
-**Running it yourself:** [docs/getting-started.md](docs/getting-started.md) walks through setup, MetaMask configuration, and buying and reselling a ticket end to end.
+**Running it yourself:** [getting-started.md](getting-started.md) walks through setup, MetaMask configuration, and buying and reselling a ticket end to end.
 
 ## 2\. System Presentation
 

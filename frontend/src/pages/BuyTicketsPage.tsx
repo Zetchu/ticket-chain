@@ -8,7 +8,7 @@ import { useTicketBoard } from '../hooks/useTicketBoard';
 
 export default function BuyTicketsPage() {
   const { isConnected } = useConnection();
-  const { market, faceValue, isPending, isError, error, refresh } = useTicketBoard();
+  const { market, owned, faceValue, isPending, isError, error, refresh } = useTicketBoard();
 
   const listedCount = market.filter((entry) => entry.listing?.active).length;
 
@@ -16,7 +16,7 @@ export default function BuyTicketsPage() {
     <Box component='section'>
       <PageHeader
         title='Buy Tickets'
-        subtitle='Every ticket on the local P2P network, capped at its original face value. Tickets you hold appear here too, so you can see and adjust your own offers alongside everyone else’s.'
+        subtitle='Tickets on the local P2P network, capped at their original face value. Your own tickets show up here once you list them for resale.'
       />
 
       {isPending ? (
@@ -37,6 +37,11 @@ export default function BuyTicketsPage() {
             onChainRefresh={refresh}
           />
         </>
+      ) : owned.length > 0 ? (
+        <StatePanel
+          title='Nothing on the market right now'
+          description='No one else is offering a ticket. The tickets you hold are on the My Tickets page — list one and it will appear here.'
+        />
       ) : (
         <StatePanel
           title='No tickets discovered yet'

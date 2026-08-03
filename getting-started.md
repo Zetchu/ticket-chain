@@ -251,10 +251,12 @@ chmod +x start_dev.sh
 
 ## Where to look next
 
-- [`docs/architecture.md`](architecture.md) — how the three layers fit together
-- [`contracts/contracts/TicketNFT.sol`](../contracts/contracts/TicketNFT.sol) — the
+- [`docs/architecture.md`](docs/architecture.md) — how the three layers fit together
+- [`docs/demo-scenarios.md`](docs/demo-scenarios.md) — the sunny-day and rainy-day
+  demo runbook
+- [`contracts/contracts/TicketNFT.sol`](contracts/contracts/TicketNFT.sol) — the
   anti-scalping rules, in about 100 lines
-- [`network/blockchain/`](../network/blockchain/) — the hand-built chain: Merkle
+- [`network/blockchain/`](network/blockchain/) — the hand-built chain: Merkle
   trees, proof-of-work, transaction signing
-- [`frontend/src/hooks/useTicketBoard.ts`](../frontend/src/hooks/useTicketBoard.ts) —
+- [`frontend/src/hooks/useTicketBoard.ts`](frontend/src/hooks/useTicketBoard.ts) —
   where the P2P feed and on-chain state get joined together
