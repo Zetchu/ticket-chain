@@ -89,7 +89,7 @@ installs dependencies. You're looking for this:
 ⏳ Waiting for JSON-RPC on 127.0.0.1:8545...
 ⚙️ Deploying fresh smart contracts...
 TicketNFT deployed to: 0x5FbDB2315678afecb367f032d93F642f64180aa3 (network: localhost)
-Minted 3 ticket(s) (token IDs 0..2) to 0x7099...79C8, each listed at 0.05 ETH
+ABI + address exported to .../frontend/src/contracts/TicketNFT.json
 🌐 Starting P2P Network (logs routing to network.log)...
 💻 Starting React UI...
 
@@ -100,8 +100,8 @@ Minted 3 ticket(s) (token IDs 0..2) to 0x7099...79C8, each listed at 0.05 ETH
 **Ctrl+C stops everything.** Backend output goes to `hardhat.log` and
 `network.log` in the project root — check those first if something looks wrong.
 
-Open <http://localhost:5173>. You should see three ticket cards. They'll say
-"Connect to buy" until you finish the next two steps.
+Open <http://localhost:5173>. The ticket board starts empty — connect as account #0
+(the organizer) and use the **Organizer** page to mint your first tickets.
 
 ---
 
@@ -135,13 +135,13 @@ because the contract refuses to let you buy your own ticket.
 In MetaMask: account menu → **Add account or hardware wallet** → **Import
 account** → paste the private key.
 
-**Account #0 — the organizer** (deployed the contract):
+**Account #0 — the organizer** (deployed the contract, can mint tickets):
 
 ```
 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
-**Account #1 — holds the three starter tickets:**
+**Account #1 — a buyer** (used to purchase from the organizer):
 
 ```
 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
@@ -155,13 +155,15 @@ Back in the app, click **Connect Wallet** and approve the connection.
 
 ---
 
-## 6. Buy a ticket
+## 6. Mint tickets and buy one
 
-1. Switch MetaMask to **Account #0**.
-2. On **Buy Tickets**, pick any card — they're listed at 0.05 ETH by account #1.
-3. Click **Buy Ticket** and confirm in MetaMask.
-4. The button walks through *Confirm in wallet* → *Processing* → *Purchased*, and
-   the card's owner address changes to yours.
+1. Connect as **Account #0**. The **Organizer** page appears in the nav.
+2. Go to **Organizer**, enter a quantity (e.g. 3), and click **Mint & List**.
+   Confirm in MetaMask. The tickets appear on the **Buy Tickets** page instantly.
+3. Switch MetaMask to **Account #1**.
+4. On **Buy Tickets**, pick a card — listed at 0.05 ETH by account #0.
+5. Click **Buy Ticket** and confirm. The button walks through *Confirm in wallet* →
+   *Processing* → *Purchased*, and the card's owner address changes to yours.
 
 Open **My Tickets** in the nav and it's there.
 
@@ -196,11 +198,11 @@ so it can't be bypassed by editing the page.
 # Local blockchain only
 cd contracts && npx hardhat node
 
-# Deploy (and mint the starter tickets) against a running node
+# Deploy contracts against a running node (exports ABI to frontend)
 cd contracts && npx hardhat run scripts/deploy.js --network localhost
 
 # P2P node + ticket API
-cd network && .venv/bin/python main.py --seed 3
+cd network && .venv/bin/python main.py
 
 # Frontend dev server
 cd frontend && npm install && npm run dev
@@ -239,8 +241,8 @@ pkill -f "hardhat node"; pkill -f vite; pkill -f "main.py"
 ```
 
 **Tickets vanished after a restart**
-Expected. Every run of `start_dev.sh` deploys a fresh chain and re-mints three
-starter tickets. Purchases and listings from the previous run are gone.
+Expected. Every run of `start_dev.sh` deploys a fresh chain. Go to the
+**Organizer** page and mint new tickets to repopulate the board.
 
 **`./start_dev.sh: Permission denied`**
 ```bash

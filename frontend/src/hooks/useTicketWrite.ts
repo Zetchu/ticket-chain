@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 import type { Abi } from 'viem';
 
-/** The three writes a ticket card can submit. */
-export type TicketAction = 'buy' | 'list' | 'cancel';
+/** The four writes the UI can submit. */
+export type TicketAction = 'buy' | 'list' | 'cancel' | 'mint';
 
 /**
  * A contract call to submit.

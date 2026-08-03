@@ -6,6 +6,7 @@ import Hero from './components/Hero';
 import WrongNetworkBanner from './components/WrongNetworkBanner';
 import BuyTicketsPage from './pages/BuyTicketsPage';
 import MyTicketsPage from './pages/MyTicketsPage';
+import OrganizerPage from './pages/OrganizerPage';
 import { createAppTheme } from './theme';
 import { ColorModeContext } from './ColorModeContext';
 
@@ -48,6 +49,7 @@ function App() {
             <Routes>
               <Route path='/' element={<BuyTicketsPage />} />
               <Route path='/my-tickets' element={<MyTicketsPage />} />
+              <Route path='/organizer' element={<OrganizerPage />} />
               {/* Any unknown path lands on the ticket list rather than a dead end. */}
               <Route path='*' element={<Navigate to='/' replace />} />
             </Routes>

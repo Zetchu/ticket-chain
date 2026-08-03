@@ -47,7 +47,7 @@ from ipv8.configuration import (
 from ipv8.bootstrapping.udpbroadcast.bootstrapper import UDPBroadcastBootstrapper
 from ipv8.messaging.lazy_payload import VariablePayload, vp_compile
 from ipv8.peerdiscovery.network import PeerObserver
-from ipv8.types import Peer
+from ipv8.peer import Peer
 from ipv8.util import run_forever
 from ipv8_service import IPv8
 

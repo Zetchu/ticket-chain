@@ -60,6 +60,29 @@ contract TicketNFT is ERC721, Ownable {
         emit TicketMinted(to, tokenId, FACE_VALUE);
     }
 
+    /// @notice Mint `quantity` tickets to the organizer and list each at face
+    ///         value so they are immediately available for purchase.
+    /// @dev The primary sale flows through resaleTransfer — one payment code
+    ///      path, price ceiling enforced on first sale just like any resale.
+    function mintAndList(uint256 quantity) external onlyOwner {
+        require(quantity > 0, "Quantity must be at least 1");
+        for (uint256 i = 0; i < quantity; i++) {
+            uint256 tokenId = _nextTokenId++;
+            tickets[tokenId] = Ticket({faceValue: FACE_VALUE, isResellable: true});
+            _safeMint(msg.sender, tokenId);
+            emit TicketMinted(msg.sender, tokenId, FACE_VALUE);
+            listings[tokenId] = Listing({price: FACE_VALUE, active: true});
+            emit TicketListed(tokenId, msg.sender, FACE_VALUE);
+        }
+    }
+
+    /// @notice Total number of tickets minted so far (equals the next token ID).
+    /// @dev The frontend enumerates 0..totalMinted-1 to discover all tokens
+    ///      without depending solely on the P2P feed.
+    function totalMinted() external view returns (uint256) {
+        return _nextTokenId;
+    }
+
     /// @notice Offer the caller's ticket for resale at `price`.
     /// @dev The price ceiling is enforced here rather than at purchase time:
     ///      a scalper cannot even advertise above face value. Re-listing an

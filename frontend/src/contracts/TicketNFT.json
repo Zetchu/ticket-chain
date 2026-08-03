@@ -1,7 +1,7 @@
 {
   "contractName": "TicketNFT",
   "network": "localhost",
-  "address": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+  "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
   "abi": [
     {
       "inputs": [],
@@ -497,6 +497,19 @@
     {
       "inputs": [
         {
+          "internalType": "uint256",
+          "name": "quantity",
+          "type": "uint256"
+        }
+      ],
+      "name": "mintAndList",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "address",
           "name": "to",
           "type": "address"
@@ -735,6 +748,19 @@
           "internalType": "string",
           "name": "",
           "type": "string"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "totalMinted",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
         }
       ],
       "stateMutability": "view",
