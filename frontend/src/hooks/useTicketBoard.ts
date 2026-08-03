@@ -149,17 +149,20 @@ export function useTicketBoard() {
     [uniqueTickets, chainData, address],
   );
 
-  // The market view: every ticket on the network, listed ones first, since
-  // those are what a visitor can act on. Tickets held by the connected wallet
-  // stay in the list — a seller should see their own offer sitting on the
-  // marketplace exactly as buyers see it.
+  // The market view, listed tickets first since those are what a visitor can
+  // act on. Your own tickets appear here only once you have listed them: an
+  // unlisted ticket is not on the market, so it belongs on My Tickets alone.
+  // Someone else's unlisted ticket still shows, marked "Not for sale" — it is
+  // part of the network's inventory, just not for sale today.
   const market = useMemo(
     () =>
-      [...boardTickets].sort(
-        (a, b) =>
-          Number(b.listing?.active ?? false) - Number(a.listing?.active ?? false) ||
-          a.ticket.id - b.ticket.id,
-      ),
+      boardTickets
+        .filter((entry) => !entry.isOwnedByViewer || entry.listing?.active)
+        .sort(
+          (a, b) =>
+            Number(b.listing?.active ?? false) - Number(a.listing?.active ?? false) ||
+            a.ticket.id - b.ticket.id,
+        ),
     [boardTickets],
   );
 
