@@ -16,6 +16,15 @@ describe("TicketNFT", function () {
     return state;
   }
 
+  // Token 0 minted to Alice and listed by her at face value — the starting
+  // point for every purchase test.
+  async function listedFixture() {
+    const state = await loadFixture(mintedFixture);
+    const price = await state.ticket.FACE_VALUE();
+    await state.ticket.connect(state.alice).listForSale(0, price);
+    return { ...state, price };
+  }
+
   describe("Minting", function () {
     it("lets the organizer mint a ticket to an attendee", async function () {
       const { ticket, alice } = await loadFixture(deployFixture);
@@ -91,10 +100,95 @@ describe("TicketNFT", function () {
     });
   });
 
-  describe("resaleTransfer (anti-scalping)", function () {
-    it("sells the ticket at face value and forwards payment to the seller", async function () {
-      const { ticket, alice, bob } = await loadFixture(mintedFixture);
+  describe("listForSale / cancelListing (owner consent)", function () {
+    it("lets the ticket owner list at face value", async function () {
+      const { ticket, alice } = await loadFixture(mintedFixture);
       const price = await ticket.FACE_VALUE();
+
+      await expect(ticket.connect(alice).listForSale(0, price))
+        .to.emit(ticket, "TicketListed")
+        .withArgs(0, alice.address, price);
+
+      const [listedPrice, active] = await ticket.listings(0);
+      expect(listedPrice).to.equal(price);
+      expect(active).to.equal(true);
+    });
+
+    it("lets the owner list below face value", async function () {
+      const { ticket, alice } = await loadFixture(mintedFixture);
+      const discount = ethers.parseEther("0.01");
+      await ticket.connect(alice).listForSale(0, discount);
+      expect((await ticket.listings(0)).price).to.equal(discount);
+    });
+
+    it("rejects a listing above face value (rainy day)", async function () {
+      const { ticket, alice } = await loadFixture(mintedFixture);
+      const scalperPrice = (await ticket.FACE_VALUE()) + 1n;
+      await expect(
+        ticket.connect(alice).listForSale(0, scalperPrice)
+      ).to.be.revertedWith("Scalping detected: Price exceeds face value");
+    });
+
+    it("rejects a listing from someone who does not own the ticket", async function () {
+      const { ticket, bob } = await loadFixture(mintedFixture);
+      await expect(
+        ticket.connect(bob).listForSale(0, await ticket.FACE_VALUE())
+      ).to.be.revertedWith("Only the ticket owner can list it");
+    });
+
+    it("rejects a listing for a ticket locked against resale", async function () {
+      const { ticket, alice } = await loadFixture(mintedFixture);
+      await ticket.setResellable(0, false);
+      await expect(
+        ticket.connect(alice).listForSale(0, await ticket.FACE_VALUE())
+      ).to.be.revertedWith("Ticket is not resellable");
+    });
+
+    it("lets the owner re-list at a new price", async function () {
+      const { ticket, alice } = await loadFixture(listedFixture);
+      const lower = ethers.parseEther("0.02");
+      await ticket.connect(alice).listForSale(0, lower);
+      expect((await ticket.listings(0)).price).to.equal(lower);
+    });
+
+    it("lets the owner cancel a listing", async function () {
+      const { ticket, alice } = await loadFixture(listedFixture);
+
+      await expect(ticket.connect(alice).cancelListing(0))
+        .to.emit(ticket, "TicketUnlisted")
+        .withArgs(0, alice.address);
+
+      expect((await ticket.listings(0)).active).to.equal(false);
+    });
+
+    it("rejects cancelling a listing the caller does not own", async function () {
+      const { ticket, bob } = await loadFixture(listedFixture);
+      await expect(
+        ticket.connect(bob).cancelListing(0)
+      ).to.be.revertedWith("Only the ticket owner can cancel it");
+    });
+
+    it("rejects cancelling a ticket that is not listed", async function () {
+      const { ticket, alice } = await loadFixture(mintedFixture);
+      await expect(
+        ticket.connect(alice).cancelListing(0)
+      ).to.be.revertedWith("Ticket is not listed for sale");
+    });
+
+    it("withdraws the listing when the organizer locks the ticket", async function () {
+      const { ticket, alice } = await loadFixture(listedFixture);
+
+      await expect(ticket.setResellable(0, false))
+        .to.emit(ticket, "TicketUnlisted")
+        .withArgs(0, alice.address);
+
+      expect((await ticket.listings(0)).active).to.equal(false);
+    });
+  });
+
+  describe("resaleTransfer (anti-scalping)", function () {
+    it("sells the ticket at the listed price and forwards payment to the seller", async function () {
+      const { ticket, alice, bob, price } = await loadFixture(listedFixture);
 
       await expect(
         ticket.connect(bob).resaleTransfer(0, { value: price })
@@ -103,49 +197,69 @@ describe("TicketNFT", function () {
       expect(await ticket.ownerOf(0)).to.equal(bob.address);
     });
 
+    it("clears the listing once the sale completes", async function () {
+      const { ticket, bob, price } = await loadFixture(listedFixture);
+      await ticket.connect(bob).resaleTransfer(0, { value: price });
+      expect((await ticket.listings(0)).active).to.equal(false);
+    });
+
     it("emits TicketTransferred(tokenId, from, to, price)", async function () {
-      const { ticket, alice, bob } = await loadFixture(mintedFixture);
-      const price = await ticket.FACE_VALUE();
+      const { ticket, alice, bob, price } = await loadFixture(listedFixture);
       await expect(ticket.connect(bob).resaleTransfer(0, { value: price }))
         .to.emit(ticket, "TicketTransferred")
         .withArgs(0, alice.address, bob.address, price);
     });
 
-    it("reverts when the price exceeds the face value (rainy day)", async function () {
+    it("reverts when the ticket was never listed — the holder is not forced to sell", async function () {
       const { ticket, bob } = await loadFixture(mintedFixture);
-      const scalperPrice = (await ticket.FACE_VALUE()) + 1n;
       await expect(
-        ticket.connect(bob).resaleTransfer(0, { value: scalperPrice })
-      ).to.be.revertedWith("Scalping detected: Price exceeds face value");
+        ticket.connect(bob).resaleTransfer(0, { value: await ticket.FACE_VALUE() })
+      ).to.be.revertedWith("Ticket is not listed for sale");
     });
 
-    it("reverts when the payment is below the face value", async function () {
-      const { ticket, bob } = await loadFixture(mintedFixture);
-      const underPrice = (await ticket.FACE_VALUE()) - 1n;
+    it("reverts when the listing was cancelled before the purchase landed", async function () {
+      const { ticket, alice, bob, price } = await loadFixture(listedFixture);
+      await ticket.connect(alice).cancelListing(0);
       await expect(
-        ticket.connect(bob).resaleTransfer(0, { value: underPrice })
-      ).to.be.revertedWith("Payment below face value");
+        ticket.connect(bob).resaleTransfer(0, { value: price })
+      ).to.be.revertedWith("Ticket is not listed for sale");
+    });
+
+    it("reverts when the buyer overpays the listed price", async function () {
+      const { ticket, bob, price } = await loadFixture(listedFixture);
+      await expect(
+        ticket.connect(bob).resaleTransfer(0, { value: price + 1n })
+      ).to.be.revertedWith("Payment must equal the listed price");
+    });
+
+    it("reverts when the buyer underpays the listed price", async function () {
+      const { ticket, bob, price } = await loadFixture(listedFixture);
+      await expect(
+        ticket.connect(bob).resaleTransfer(0, { value: price - 1n })
+      ).to.be.revertedWith("Payment must equal the listed price");
     });
 
     it("reverts when the buyer sends nothing at all", async function () {
-      const { ticket, bob } = await loadFixture(mintedFixture);
+      const { ticket, bob } = await loadFixture(listedFixture);
       await expect(
         ticket.connect(bob).resaleTransfer(0, { value: 0 })
-      ).to.be.revertedWith("Payment below face value");
+      ).to.be.revertedWith("Payment must equal the listed price");
     });
 
     it("reverts when the ticket is locked against resale", async function () {
-      const { ticket, bob } = await loadFixture(mintedFixture);
+      const { ticket, bob, price } = await loadFixture(listedFixture);
+      // Locking also withdraws the listing, so the sale is refused at the
+      // listing check rather than the resellable one.
       await ticket.setResellable(0, false);
       await expect(
-        ticket.connect(bob).resaleTransfer(0, { value: 0 })
-      ).to.be.revertedWith("Ticket is not resellable");
+        ticket.connect(bob).resaleTransfer(0, { value: price })
+      ).to.be.revertedWith("Ticket is not listed for sale");
     });
 
     it("reverts when the buyer already owns the ticket", async function () {
-      const { ticket, alice } = await loadFixture(mintedFixture);
+      const { ticket, alice, price } = await loadFixture(listedFixture);
       await expect(
-        ticket.connect(alice).resaleTransfer(0, { value: 0 })
+        ticket.connect(alice).resaleTransfer(0, { value: price })
       ).to.be.revertedWith("Cannot buy your own ticket");
     });
 
@@ -157,18 +271,20 @@ describe("TicketNFT", function () {
     });
 
     it("supports being resold multiple times in a row, always at face value", async function () {
-      const { ticket, organizer, alice, bob } = await loadFixture(mintedFixture);
+      const { ticket, organizer, alice, bob } = await loadFixture(listedFixture);
       const price = await ticket.FACE_VALUE();
 
       // alice -> bob
       await ticket.connect(bob).resaleTransfer(0, { value: price });
       expect(await ticket.ownerOf(0)).to.equal(bob.address);
 
-      // bob -> organizer (any account can be seller/buyer in turn)
+      // bob -> organizer (each new owner must offer the ticket in turn)
+      await ticket.connect(bob).listForSale(0, price);
       await ticket.connect(organizer).resaleTransfer(0, { value: price });
       expect(await ticket.ownerOf(0)).to.equal(organizer.address);
 
       // organizer -> alice
+      await ticket.connect(organizer).listForSale(0, price);
       await expect(
         ticket.connect(alice).resaleTransfer(0, { value: price })
       ).to.changeEtherBalances([alice, organizer], [-price, price]);
@@ -186,6 +302,7 @@ describe("TicketNFT", function () {
 
       await ticket.mintTicket(rejectorAddress);
       const price = await ticket.FACE_VALUE();
+      await rejector.listHeldTicket(await ticket.getAddress(), 0, price);
 
       await expect(
         ticket.connect(bob).resaleTransfer(0, { value: price })

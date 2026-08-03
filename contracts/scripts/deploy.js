@@ -26,18 +26,22 @@ async function main() {
 // organizer and the account most people import into MetaMask first —
 // resaleTransfer rejects buying your own ticket, so holding the seed tickets
 // on a different account keeps the purchase flow clickable out of the box.
+// Each ticket is then listed by its holder: a ticket can only be bought once
+// its owner has offered it for sale.
 async function seedTickets(ticket) {
   if (SEED_COUNT <= 0) return;
 
   const signers = await ethers.getSigners();
   const holder = signers[1] ?? signers[0];
+  const faceValue = await ticket.FACE_VALUE();
 
   for (let i = 0; i < SEED_COUNT; i++) {
-    const tx = await ticket.mintTicket(holder.address);
-    await tx.wait();
+    await (await ticket.mintTicket(holder.address)).wait();
+    await (await ticket.connect(holder).listForSale(i, faceValue)).wait();
   }
   console.log(
-    `Minted ${SEED_COUNT} ticket(s) (token IDs 0..${SEED_COUNT - 1}) to ${holder.address}`
+    `Minted ${SEED_COUNT} ticket(s) (token IDs 0..${SEED_COUNT - 1}) to ${holder.address}, ` +
+      `each listed at ${ethers.formatEther(faceValue)} ETH`
   );
 }
 
