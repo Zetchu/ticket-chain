@@ -14,6 +14,8 @@ Covers:
 """
 
 import copy
+import hashlib
+
 import pytest
 
 from blockchain import (
@@ -522,3 +524,83 @@ class TestAPI:
             "/tickets", headers={"Origin": "http://localhost:5173"}
         )
         assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+
+class TestImageUpload:
+    """POST /images and GET /images/{hash} — organizer event artwork."""
+
+    # Smallest valid PNG: a single transparent pixel.
+    PNG = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
+    )
+
+    @pytest.fixture
+    def client(self, blockchain, tmp_path, monkeypatch):
+        """A client whose uploads land in a temp directory, not the repo."""
+        from fastapi.testclient import TestClient
+        import api
+
+        monkeypatch.setattr(api, "IMAGE_DIR", tmp_path / "images")
+        return TestClient(api.create_app(blockchain))
+
+    def test_upload_returns_content_hash_and_url(self, client):
+        resp = client.post(
+            "/images", files={"file": ("pass.png", self.PNG, "image/png")}
+        )
+        assert resp.status_code == 200
+
+        body = resp.json()
+        assert body["hash"] == hashlib.sha256(self.PNG).hexdigest()
+        assert body["hash"] in body["url"]
+        assert body["bytes"] == len(self.PNG)
+
+    def test_uploaded_image_is_served_back(self, client):
+        digest = client.post(
+            "/images", files={"file": ("pass.png", self.PNG, "image/png")}
+        ).json()["hash"]
+
+        resp = client.get(f"/images/{digest}")
+        assert resp.status_code == 200
+        assert resp.content == self.PNG
+
+    def test_same_image_twice_is_stored_once(self, client, tmp_path):
+        """Content addressing: re-uploading is a no-op, not a duplicate."""
+        first = client.post("/images", files={"file": ("a.png", self.PNG, "image/png")})
+        second = client.post("/images", files={"file": ("b.png", self.PNG, "image/png")})
+
+        assert first.json()["hash"] == second.json()["hash"]
+        assert len(list((tmp_path / "images").iterdir())) == 1
+
+    def test_rejects_a_non_image_upload(self, client):
+        resp = client.post(
+            "/images", files={"file": ("payload.html", b"<script>", "text/html")}
+        )
+        assert resp.status_code == 415
+
+    def test_rejects_an_empty_upload(self, client):
+        resp = client.post("/images", files={"file": ("empty.png", b"", "image/png")})
+        assert resp.status_code == 400
+
+    def test_rejects_an_oversized_upload(self, client):
+        from api import MAX_IMAGE_BYTES
+
+        oversized = b"\x89PNG" + b"\x00" * MAX_IMAGE_BYTES
+        resp = client.post(
+            "/images", files={"file": ("huge.png", oversized, "image/png")}
+        )
+        assert resp.status_code == 413
+
+    def test_unknown_hash_is_404(self, client):
+        resp = client.get(f"/images/{'a' * 64}")
+        assert resp.status_code == 404
+
+    def test_malformed_hash_is_rejected_before_touching_the_filesystem(self, client):
+        """A hash arrives from a URL, so only a plain hex digest may reach disk.
+
+        Path separators and dot segments are normalised away before routing, so
+        the guard covers the rest: wrong length, wrong alphabet, anything that
+        is not a bare hex digest.
+        """
+        for bad in ("not-a-hash", "a" * 63, "g" * 64, "0x" + "a" * 62):
+            assert client.get(f"/images/{bad}").status_code == 400

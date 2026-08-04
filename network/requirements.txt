@@ -9,3 +9,5 @@ httpx==0.28.1
 # Ethereum bridge: watches TicketNFT contract events on the local Hardhat
 # node and republishes them into the P2P chain (see bridge.py).
 web3==7.16.0
+# Multipart form parsing for POST /images (organizer artwork uploads).
+python-multipart==0.0.20

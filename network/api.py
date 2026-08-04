@@ -5,20 +5,26 @@ frontend. Runs on http://127.0.0.1:8080 alongside the IPv8 node, inside
 the same asyncio event loop (uvicorn serves as a background task).
 
 Endpoints:
-    GET /tickets  — JSON array of tickets discovered on the local chain
-                    (mined blocks + pending mempool transactions).
+    GET  /tickets       — JSON array of tickets discovered on the local chain
+                          (mined blocks + pending mempool transactions).
+    POST /images        — store event artwork, addressed by content hash.
+    GET  /images/{hash} — serve previously stored artwork.
+    GET  /health        — node status.
 
-The response schema matches what frontend/src/components/TicketGrid.tsx
-expects: {id, type, price, title, location, date}.
+The ticket schema matches what the frontend expects:
+{id, type, price, title, location, date}.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from blockchain import Blockchain, Transaction
 
@@ -35,6 +41,21 @@ API_PORT = int(os.environ.get("TICKETCHAIN_API_PORT", "8080"))
 # (see API_HOST), so "any port on this machine" is the same trust boundary the
 # socket already enforces.
 ALLOWED_ORIGIN_REGEX = r"http://(localhost|127\.0\.0\.1)(:\d+)?"
+
+# Event artwork uploaded by organizers. Stored next to this module, one file
+# per image, named by content hash — the same picture uploaded twice is stored
+# once, and the reference the contract holds is a fixed-length hash rather than
+# a filename someone could collide or spoof.
+IMAGE_DIR = Path(os.environ.get("TICKETCHAIN_IMAGE_DIR", Path(__file__).parent / "images"))
+MAX_IMAGE_BYTES = 4 * 1024 * 1024
+# Only formats a browser will render inline, so a stored file can never be
+# something the frontend would hand to the user as a download.
+ALLOWED_IMAGE_TYPES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
 
 
 def _tx_to_ticket(tx: Transaction, status: str) -> dict | None:
@@ -80,7 +101,7 @@ def create_app(blockchain: Blockchain) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=ALLOWED_ORIGIN_REGEX,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
 
@@ -107,6 +128,57 @@ def create_app(blockchain: Blockchain) -> FastAPI:
                 tickets.append(ticket)
 
         return tickets
+
+    @app.post("/images")
+    async def upload_image(file: UploadFile = File(...)) -> dict:
+        """Store event artwork and return the hash the contract should record.
+
+        Content-addressed: the SHA-256 of the bytes is both the filename and
+        the reference minted on-chain, so the contract never holds a mutable
+        path and re-uploading the same picture is a no-op.
+        """
+        if file.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Unsupported image type {file.content_type!r}. "
+                f"Allowed: {', '.join(sorted(ALLOWED_IMAGE_TYPES))}.",
+            )
+
+        data = await file.read(MAX_IMAGE_BYTES + 1)
+        if len(data) > MAX_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Image exceeds the {MAX_IMAGE_BYTES // (1024 * 1024)} MB limit.",
+            )
+        if not data:
+            raise HTTPException(status_code=400, detail="Empty upload.")
+
+        digest = hashlib.sha256(data).hexdigest()
+        IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+        stored = IMAGE_DIR / f"{digest}{ALLOWED_IMAGE_TYPES[file.content_type]}"
+        if not stored.exists():
+            stored.write_bytes(data)
+
+        return {
+            "hash": digest,
+            "url": f"http://{API_HOST}:{API_PORT}/images/{digest}",
+            "bytes": len(data),
+        }
+
+    @app.get("/images/{image_hash}")
+    def get_image(image_hash: str) -> FileResponse:
+        """Serve stored artwork by content hash."""
+        # The hash comes straight from a URL, so reject anything that is not a
+        # plain hex digest before it reaches the filesystem.
+        if len(image_hash) != 64 or not all(c in "0123456789abcdef" for c in image_hash):
+            raise HTTPException(status_code=400, detail="Malformed image hash.")
+
+        for extension in ALLOWED_IMAGE_TYPES.values():
+            candidate = IMAGE_DIR / f"{image_hash}{extension}"
+            if candidate.exists():
+                return FileResponse(candidate)
+
+        raise HTTPException(status_code=404, detail="No image stored under that hash.")
 
     @app.get("/health")
     def health() -> dict:
