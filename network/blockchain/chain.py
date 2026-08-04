@@ -141,6 +141,36 @@ class Blockchain:
         return True
 
     # ------------------------------------------------------------------
+    # Chain sync (longest-valid-chain rule)
+    # ------------------------------------------------------------------
+
+    def should_replace_with(self, candidate: "Blockchain") -> bool:
+        """Return True iff *candidate* should replace this chain.
+
+        This is the longest-valid-chain rule a node applies when a peer
+        offers its chain (e.g. in response to a P2P chain-sync request):
+
+        - *candidate* must be strictly longer. Adopting an equal or shorter
+          chain would let a stale or malicious peer roll a node backwards.
+        - *candidate* must share this chain's genesis block. Without this
+          check, a longer chain that is perfectly self-consistent but
+          belongs to an entirely different network would still pass
+          ``is_chain_valid()`` and could hijack a node outright.
+        - *candidate* must pass full validation (PoW, linkage, Merkle
+          roots, transaction signatures).
+
+        Never mutates either chain — callers that decide to adopt still
+        need to actually swap ``self.chain`` for ``candidate.chain``.
+        """
+        if not candidate.chain or not self.chain:
+            return False
+        if len(candidate.chain) <= len(self.chain):
+            return False
+        if candidate.chain[0].block_hash() != self.chain[0].block_hash():
+            return False
+        return candidate.is_chain_valid()
+
+    # ------------------------------------------------------------------
     # Serialization (for P2P broadcast)
     # ------------------------------------------------------------------
 

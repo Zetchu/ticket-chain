@@ -2,35 +2,35 @@
   "transaction_execution": {
     "sign": {
       "n": 200,
-      "min_ms": 0.3083,
-      "max_ms": 5.2597,
-      "avg_ms": 0.4035,
-      "median_ms": 0.3261
+      "min_ms": 0.3075,
+      "max_ms": 6.6504,
+      "avg_ms": 0.3972,
+      "median_ms": 0.3218
     },
     "validate": {
       "n": 200,
-      "min_ms": 0.3163,
-      "max_ms": 1.6398,
-      "avg_ms": 0.4051,
-      "median_ms": 0.34
+      "min_ms": 0.317,
+      "max_ms": 1.0367,
+      "avg_ms": 0.3894,
+      "median_ms": 0.3346
     },
-    "sign_plus_validate_avg_ms": 0.8086
+    "sign_plus_validate_avg_ms": 0.7866
   },
   "block_finality": {
     "difficulty_bits": 16,
     "txs_per_block": 5,
     "mine_time": {
       "n": 10,
-      "min_ms": 62.1464,
-      "max_ms": 1426.283,
-      "avg_ms": 425.4521,
-      "median_ms": 306.0478
+      "min_ms": 7.136,
+      "max_ms": 2699.4746,
+      "avg_ms": 755.266,
+      "median_ms": 388.6668
     },
-    "avg_nonce_iterations": 85947.1
+    "avg_nonce_iterations": 66236.1
   },
   "p2p": {
-    "discovery_latency_s": 0.558,
-    "propagation_latency_s": 0.149,
+    "discovery_latency_s": 0.874,
+    "propagation_latency_s": 2.836,
     "propagated": true
   }
 }

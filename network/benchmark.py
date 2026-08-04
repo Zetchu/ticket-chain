@@ -185,22 +185,15 @@ async def bench_p2p(discovery_timeout: float = 30.0, propagation_timeout: float 
     if sys.version_info >= (3, 13):
         _patch_vp_compile_for_pep667()
     # Imported lazily: pulls in ipv8/uvicorn, only needed for --p2p.
-    import main as main_module
     from main import start_node
 
     PORT_A, PORT_B = 8190, 8191
     API_A, API_B = 8180, 8181
 
-    # main.py does `from api import API_HOST, API_PORT`, binding its own
-    # module-level copy of API_PORT — patching api.API_PORT afterwards has no
-    # effect on it, since start_api_server() reads main.API_PORT. Patch that
-    # name directly so the two nodes' HTTP APIs don't collide on :8080.
-    async def start(port: int, api_port: int):
-        main_module.API_PORT = api_port
-        return await start_node(port, event="benchmark")
-
-    node_a = await start(PORT_A, API_A)
-    node_b = await start(PORT_B, API_B)
+    # Two nodes on one machine need distinct API ports — a bind failure
+    # here is not a survivable error (see start_api_server's docstring).
+    node_a = await start_node(PORT_A, event="benchmark", api_port=API_A)
+    node_b = await start_node(PORT_B, event="benchmark", api_port=API_B)
 
     try:
         # --- discovery latency: time until both nodes see each other ---
@@ -264,7 +257,6 @@ async def bench_p2p(discovery_timeout: float = 30.0, propagation_timeout: float 
     finally:
         await node_a.stop()
         await node_b.stop()
-        main_module.API_PORT = 8080
 
 
 # ---------------------------------------------------------------------------

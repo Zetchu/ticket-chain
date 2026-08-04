@@ -6,6 +6,9 @@ referenced in the [README](../README.md#5-live-demo-scenarios):
 - **☀️ Sunny Day** — a regular, face-value ticket transfer via the UI.
 - **🌧️ Rainy Day** — a scalper attempts to buy above face value directly
   against the contract, and the anti-scalping check reverts the transaction.
+- **🔗 Two-Node Propagation** — a second P2P node joins (or rejoins) the
+  network and catches up on the chain it missed via chain sync, instead of
+  getting stuck out of sync forever.
 
 Both were run end-to-end against this repo while writing this doc; the
 exact commands and output below are real, not illustrative.
@@ -28,6 +31,9 @@ The P2P node's event bridge (`network/bridge.py`) watches the deployed
 contract, so every mint, listing, cancellation, and purchase lands in the
 P2P feed automatically — mint tickets from the organizer panel and they
 appear in the grid with no manual seeding step.
+
+For Scenario 3 below (two-node chain sync), use `./start_demo.sh` instead —
+it's the same stack plus a second P2P node.
 
 > **Windows note:** `start_dev.sh` is written for macOS/Linux (it symlinks
 > `libsodium` from Homebrew for pyipv8). On Windows, run the three
@@ -145,6 +151,92 @@ Ticket #0 owner unchanged: YES
   and call `resaleTransfer` with a hand-typed overpriced `value` live — the
   script above is just the scripted/repeatable form of the same call.
 
+## 3. 🔗 Two-Node Propagation — Chain Sync
+
+**Story:** a node that joins late, or drops offline and comes back, doesn't
+get permanently stuck with a stale chain. Before this was fixed, a node
+that missed even one block broadcast — a UDP packet dropped, or a node
+started after its peer had already mined — had no way to ever catch up:
+`main.py` simply logged an index mismatch and threw the block away. Now a
+node ahead-of-us or a freshly discovered peer triggers a chain-sync request
+(`ChainRequestPayload`/`ChainResponsePayload`), and the receiver adopts the
+reply only if it's both longer and passes full validation — never a
+shorter chain (no rollback attacks) and never one that just happens to be
+internally valid but starts from a different genesis (no hijack by an
+unrelated network).
+
+### Steps
+
+```bash
+./start_demo.sh
+```
+
+This runs the same stack as `start_dev.sh` (Hardhat, contracts, frontend),
+plus a second bare P2P node — **node B**, UDP port `8091`, HTTP API on
+`:8081` — alongside the primary one (**node A**, port `8090`, API `:8080`,
+the one bridging real contract events). Node B does not run its own bridge
+against the contract (`TICKETCHAIN_RPC_URL` points it at a port nothing
+listens on, so its bridge harmlessly retries forever) — everything it
+knows comes from P2P chain sync with node A, exactly like a real second
+peer joining the network would.
+
+### What to point out live
+
+- **Late joiner:** mint a ticket or two from the organizer panel before
+  node B has even discovered node A. Once B's log shows `discovered peer`,
+  watch the very next lines: B sends a chain request on discovery, A
+  replies with its (longer) chain, and B logs `→ adopted (len N, tip
+  …)`. Then `curl http://127.0.0.1:8080/tickets` and
+  `curl http://127.0.0.1:8081/tickets` side by side — identical output.
+  This is the reliable half of this demo: verified both by
+  `network/test_two_nodes.py` (5/5 clean runs) and by hand against the real
+  bridged stack — a freshly started B converges within a second or two
+  every time we tried it.
+- **Drop and rejoin — automated, not live:** `network/test_two_nodes.py`'s
+  second phase stops node B, mines again on A, and starts a fresh B, all
+  within one process, and converges reliably (5/5 runs). Reproducing that
+  by hand against two separate OS processes — actually killing a `main.py`
+  terminal and restarting it — did **not** reliably reconverge in our own
+  testing, even waiting several minutes. With `logging.DEBUG` enabled on
+  both sides we traced it further than "peer rediscovery is flaky": after
+  such a restart, node A receives *nothing at all* from node B — not the
+  discovery-triggered request, not the periodic one below, not even B's
+  replies to A's own requests — while the reverse direction (A → B) keeps
+  working the whole time. That's a one-way send/delivery failure specific
+  to reconnecting to an identity IPv8 has already seen once, underneath
+  where `main.py` has any visibility (no exception, no dropped-packet
+  warning — the packets just don't arrive). We added a 15-second periodic
+  re-sync (`_periodic_chain_sync`) as a backstop alongside the
+  discovery/block-ahead triggers, which *does* help the case the issue is
+  literally about — a single dropped packet — but does not by itself fix
+  this specific same-identity-reconnection case, since it retries through
+  the same path. Don't stage this half as a live click-through — present
+  the automated test's output as the evidence instead.
+- **Rejecting a bad chain:** this one is a unit-test claim, not a live
+  step — `network/test_blockchain.py::TestChainSync` constructs a longer
+  chain with a broken link and a longer chain forked from a different
+  genesis, and asserts `Blockchain.should_replace_with()` rejects both.
+  Worth citing rather than staging: there's no safe way to *hand* a running
+  node a bad chain without writing a malicious peer first.
+
+### Reproducing without the frontend
+
+```bash
+cd network
+python test_two_nodes.py
+```
+
+```
+SUCCESS: phase 1 (late joiner) — nodes discovered each other after ~0.5s
+SUCCESS: phase 1 (late joiner) — B converged onto A's chain after ~0.0s (length 3, tip 0000b8b478e2da1b…)
+SUCCESS: phase 2 (rejoin after drop) — nodes discovered each other after ~1.0s
+SUCCESS: phase 2 (rejoin after drop) — B converged onto A's chain after ~0.0s (length 4, tip 0000a9bc90e1728a…)
+```
+
+Run five times in a row while writing this doc with the same result every
+time — this is what "passes reliably, not occasionally" is checked against,
+not a single lucky run.
+
 ## Reference: automated coverage backing these demos
 
 Both scenarios are also covered by the automated suite in
@@ -186,6 +278,13 @@ estimated) against this repo:
 - **MetaMask transaction fails immediately with no revert reason shown** —
   almost always a chain ID mismatch; confirm MetaMask is on chain `31337`,
   not `1337`.
+- **A second `main.py` process crashes the moment it starts, or takes the
+  first one down with it** — both default to HTTP API port `8080`.
+  `start_demo.sh` already passes `--api-port 8081` to node B; if you're
+  starting a second node by hand (or `8080` is taken by something else
+  entirely on your machine), pass a free `--api-port` explicitly. This
+  isn't a soft failure: uvicorn calls `sys.exit()` on a bind failure, and
+  that kills the whole Python process, not just the HTTP server.
 - **pyipv8 won't import on Windows (`Could not locate nacl lib`)** — pyipv8
   depends on libnacl, which needs a native `libsodium` shared library that
   Windows has no standard location for. Download a prebuilt

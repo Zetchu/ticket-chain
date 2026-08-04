@@ -312,6 +312,76 @@ class TestBlockchain:
 
 
 # ---------------------------------------------------------------------------
+# Chain sync tests (longest-valid-chain rule)
+# ---------------------------------------------------------------------------
+
+class TestChainSync:
+    """Blockchain.should_replace_with — the rule a node applies when a
+    peer's chain arrives over P2P chain sync (see network/main.py's
+    ChainRequestPayload / ChainResponsePayload)."""
+
+    @staticmethod
+    def _mine_n_more(chain: Blockchain, n: int) -> Blockchain:
+        for _ in range(n):
+            chain.mine_pending()
+        return chain
+
+    def test_rejects_shorter_chain(self, blockchain):
+        self._mine_n_more(blockchain, 2)
+        candidate = Blockchain(difficulty=8)  # genesis only
+        assert blockchain.should_replace_with(candidate) is False
+
+    def test_rejects_equal_length_chain(self, blockchain):
+        self._mine_n_more(blockchain, 1)
+        candidate = self._mine_n_more(Blockchain(difficulty=8), 1)
+        assert blockchain.should_replace_with(candidate) is False
+
+    def test_adopts_longer_valid_chain(self, blockchain):
+        candidate = self._mine_n_more(Blockchain(difficulty=8), 2)
+        assert blockchain.should_replace_with(candidate) is True
+
+    def test_rejects_longer_chain_with_broken_linkage(self, blockchain):
+        """A longer chain that fails is_chain_valid() must be rejected —
+        this is what stops a node from adopting a bogus longer chain."""
+        candidate = self._mine_n_more(Blockchain(difficulty=8), 2)
+        candidate.chain[1].header.prev_hash = "dead" + "0" * 60
+        assert candidate.is_chain_valid() is False  # sanity
+        assert blockchain.should_replace_with(candidate) is False
+
+    def test_rejects_longer_chain_with_tampered_transaction(self, blockchain, signed_tx):
+        candidate = Blockchain(difficulty=8)
+        candidate.add_transaction(signed_tx)
+        candidate.mine_pending()
+        self._mine_n_more(candidate, 1)
+        candidate.chain[1].transactions[0].price = 9999
+        assert candidate.is_chain_valid() is False  # sanity
+        assert blockchain.should_replace_with(candidate) is False
+
+    def test_rejects_longer_chain_with_different_genesis(self, blockchain):
+        """A chain that is internally self-consistent but started from a
+        different genesis must not be adopted just for being longer —
+        that would let an unrelated network hijack a node outright."""
+        candidate = self._mine_n_more(Blockchain(difficulty=4), 2)
+        assert candidate.is_chain_valid() is True  # sanity: valid on its own
+        assert candidate.chain[0].block_hash() != blockchain.chain[0].block_hash()
+        assert blockchain.should_replace_with(candidate) is False
+
+    def test_rejects_empty_candidate(self, blockchain):
+        candidate = Blockchain(difficulty=8)
+        candidate.chain = []
+        assert blockchain.should_replace_with(candidate) is False
+
+    def test_does_not_mutate_either_chain(self, blockchain):
+        """should_replace_with is a pure decision — the caller is
+        responsible for actually swapping the chain over."""
+        candidate = self._mine_n_more(Blockchain(difficulty=8), 2)
+        before_len = len(blockchain.chain)
+        blockchain.should_replace_with(candidate)
+        assert len(blockchain.chain) == before_len
+        assert len(candidate.chain) == 3
+
+
+# ---------------------------------------------------------------------------
 # Search puzzle tests (per-message Sybil resistance)
 # ---------------------------------------------------------------------------
 
