@@ -77,7 +77,7 @@ Bridge (network/bridge.py, web3.py)
 P2P layer — PyIPv8 overlay + hand-built blockchain :8090 (UDP)
         │  mempool → Merkle → proof-of-work → gossip → chain sync
         ▼
-HTTP API (FastAPI)                                 :8080  GET /tickets, /health
+HTTP API (FastAPI)              :8080  /tickets, /health, /images
 ```
 
 **Ethereum layer — ownership and money.** `TicketNFT.sol` is the authoritative
@@ -160,9 +160,10 @@ cd frontend  && npm run dev                               # UI only
 ## 5. Example usage
 
 **As an organizer.** Connect account #0 (the deployer) — the Organizer page
-appears. Enter an event name, date and quantity, then Mint & List. One
-transaction creates the event, mints the batch, and lists every ticket at the
-0.05 ETH face value. The cards appear on Buy Tickets immediately, and the bridge
+appears. Enter an event name, date and quantity, optionally choose a poster
+image, then Mint & List. The image is uploaded to the P2P node first and
+addressed by content hash; one transaction then creates the event, mints the
+batch, and lists every ticket at the 0.05 ETH face value. The cards appear on Buy Tickets immediately, and the bridge
 publishes the events to the P2P ledger within a couple of seconds.
 
 **As an attendee.** Switch to another account, open Buy Tickets, click Buy, and
@@ -209,7 +210,15 @@ fires, so a malicious buyer contract cannot re-enter from its callback and move
 the ticket on while the guard is still open.
 
 **Event details are stored once per event, not per ticket.** Tickets reference
-an event ID; a 500-seat show stores its name once instead of 500 times.
+an event ID; a 500-seat show stores its name and poster reference once instead
+of 500 times.
+
+**Ticket artwork is content-addressed, and always has a fallback.** An uploaded
+poster is stored by the SHA-256 of its bytes, so the contract holds a
+fixed-length hash rather than a mutable path, and the same image uploaded twice
+is stored once. When no image is uploaded, `tokenURI` returns an SVG generated
+on-chain from the token ID — so a ticket renders in a wallet with no external
+dependency at all, and is never a blank square.
 
 **The frontend enumerates tokens from the chain, not from the P2P feed.**
 `totalMinted()` gives the authoritative token range, so a freshly minted ticket
@@ -270,9 +279,14 @@ We would rather state these than have them found.
   schema has no fields for them, so the feed shows `Ticket #3` and the
   transaction timestamp. Cards look right only because the frontend reads the
   real values from the contract.
-- **Tickets have no artwork.** `tokenURI` is unimplemented, so wallets show a
-  blank NFT. The UI generates a deterministic gradient per token ID as a
-  placeholder.
+- **Uploaded artwork lives on the node that received it.** The contract stores
+  only a content hash, and any node can serve the bytes — but a second node that
+  never received the upload cannot, so its cards fall back to generated art.
+  Replicating images across peers is the same problem chain sync solved for
+  blocks, and we did not solve it.
+- **`tokenURI` points at `127.0.0.1` for uploaded artwork.** Fine for a
+  localized demo, meaningless to a wallet on another machine. Tickets minted
+  without an upload carry their SVG inline and render anywhere.
 - **Nothing persists across restarts.** Both chains are in-memory or in
   Hardhat's ephemeral state; `./start_dev.sh` starts from an empty ledger.
 - **One event's tickets share one hard-coded face value** (`FACE_VALUE`,
@@ -283,21 +297,20 @@ We would rather state these than have them found.
   network segments will never find each other.
 
 **Future work, in the order we would do it:** de-duplicate the feed; carry event
-metadata through the bridge; implement `tokenURI` with on-chain SVG art so
-tickets render in wallets with no external dependency; persist the P2P chain to
-disk; per-event pricing.
+metadata through the bridge; replicate uploaded artwork between peers so a
+second node can serve it; persist the P2P chain to disk; per-event pricing.
 
 ---
 
 ## 9. Testing coverage
 
 ```bash
-cd contracts && npx hardhat test                              # 53 tests
-cd network   && .venv/bin/python -m pytest test_blockchain.py # 54 tests
+cd contracts && npx hardhat test                              # 61 tests
+cd network   && .venv/bin/python -m pytest test_blockchain.py # 62 tests
 cd network   && .venv/bin/python test_two_nodes.py            # live two-node sync
 ```
 
-**Contracts — 53 tests.** Minting and organizer-only access control; the event
+**Contracts — 61 tests.** Minting and organizer-only access control; the event
 registry (details stored per batch, separate batches on separate events,
 metadata surviving a resale); listing and cancellation, including refusal above
 face value, from non-owners, and on locked tickets; purchase, covering exact
@@ -305,14 +318,18 @@ payment, over- and underpayment, unlisted and cancelled tickets, buying your own
 ticket, and repeat resale; a mock contract that rejects ETH, to reach the
 "payment to seller failed" branch no EOA test can; and the transfer lockdown —
 `transferFrom`, `safeTransferFrom`, approved addresses and operators are all
-blocked.
+blocked; and token metadata — that `tokenURI` decodes to parseable JSON, points
+at uploaded artwork when there is any, falls back to generated SVG when there is
+not, and escapes an event name containing quotes and angle brackets rather than
+emitting a document no wallet can read.
 
-**Blockchain core — 54 tests.** Signature verification and tamper rejection; the
+**Blockchain core — 62 tests.** Signature verification and tamper rejection; the
 price-ceiling rule; Merkle roots for even and odd leaf counts plus inclusion
 proofs; proof-of-work mining and verification; whole-chain validation against
 tampered transactions, broken links and forged proofs; the per-message search
 puzzle; the longest-valid-chain rule, including rejection of shorter, invalid,
-and foreign-genesis chains; and the HTTP API.
+and foreign-genesis chains; the HTTP API; and artwork upload — content addressing, deduplication, rejection
+of non-images, empty and oversized files, and malformed hashes.
 
 **Integration.** `test_two_nodes.py` starts two IPv8 nodes and asserts mutual
 discovery and chain convergence. `docs/demo-scenarios.md` is a manual runbook

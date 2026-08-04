@@ -21,6 +21,8 @@ export interface BoardTicket {
   owner?: string;
   listing?: Listing;
   isOwnedByViewer: boolean;
+  /** Organizer artwork for this ticket's event; absent when none was uploaded. */
+  imageUrl?: string;
 }
 
 const TICKETS_ENDPOINT = 'http://127.0.0.1:8080/tickets';
@@ -192,7 +194,7 @@ export function useTicketBoard() {
         // title and date; the P2P feed's version is only a fallback.
         const eventTuple =
           eventResult?.status === 'success'
-            ? (eventResult.result as readonly [string, bigint])
+            ? (eventResult.result as readonly [string, bigint, string])
             : undefined;
 
         return {
@@ -208,6 +210,9 @@ export function useTicketBoard() {
             ? { price: listingTuple[0], active: listingTuple[1] }
             : undefined,
           isOwnedByViewer: isSameAddress(tokenOwner, address),
+          // Empty string means the organizer uploaded nothing, so the card
+          // falls back to generated art.
+          imageUrl: eventTuple && eventTuple[2] ? eventTuple[2] : undefined,
         };
       }),
     [mergedTickets, chainData, address],
