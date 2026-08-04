@@ -1,5 +1,4 @@
 import { Box } from '@mui/material';
-import { mutedSurface } from '../theme';
 
 /** A neutral block standing in for text or a control while it loads. */
 export default function SkeletonBar({
@@ -11,12 +10,12 @@ export default function SkeletonBar({
 }) {
   return (
     <Box
-      sx={(theme) => ({
+      sx={{
         width,
         height,
-        borderRadius: 1,
-        bgcolor: mutedSurface(theme.palette.mode),
-      })}
+        borderRadius: '4px',
+        bgcolor: 'rgba(255, 255, 255, 0.06)',
+      }}
     />
   );
 }

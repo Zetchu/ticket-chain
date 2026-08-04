@@ -1,6 +1,7 @@
 import { Alert, Button, Container } from '@mui/material';
 import { useConnection, useSwitchChain } from 'wagmi';
 import { hardhat } from 'wagmi/chains';
+import { glassPanelSx, monoLabelSx, outlineButtonSx } from '../theme';
 
 /**
  * A wallet pointed at the wrong chain reads no ticket state and every write
@@ -17,13 +18,13 @@ export default function WrongNetworkBanner() {
       <Alert
         severity='warning'
         variant='outlined'
-        sx={{ bgcolor: 'background.paper', alignItems: 'center' }}
+        sx={{ ...glassPanelSx, ...monoLabelSx, alignItems: 'center' }}
         action={
           <Button
             size='small'
             disabled={isPending}
             onClick={() => switchChain({ chainId: hardhat.id })}
-            sx={{ color: 'text.primary', whiteSpace: 'nowrap' }}
+            sx={{ ...outlineButtonSx, py: 0.5, whiteSpace: 'nowrap' }}
           >
             {isPending ? 'Switching…' : 'Switch network'}
           </Button>

@@ -1,7 +1,7 @@
 import { Box, Button, TextField } from '@mui/material';
 import { useState } from 'react';
 import { formatEther, parseEther } from 'viem';
-import { filledButtonSx, outlinedButtonSx } from '../theme';
+import { ctaButtonSx, outlineButtonSx } from '../theme';
 
 /**
  * Price entry for putting a ticket up for resale.
@@ -79,7 +79,7 @@ export default function ListingForm({
           variant='outlined'
           disabled={isBusy}
           onClick={onCancel}
-          sx={outlinedButtonSx}
+          sx={outlineButtonSx}
         >
           Cancel
         </Button>
@@ -89,7 +89,7 @@ export default function ListingForm({
           variant='contained'
           disableElevation
           disabled={!canSubmit}
-          sx={filledButtonSx(false, isBusy)}
+          sx={ctaButtonSx(false, isBusy)}
         >
           {submitLabel}
         </Button>

@@ -1,35 +1,22 @@
 // src/components/Navbar.tsx
-import { useConnection, useConnect, useDisconnect, useConnectors, useReadContract } from 'wagmi';
-import { AppBar, Toolbar, Typography, Button, IconButton, Box } from '@mui/material';
-import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined';
-import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined';
+import { useConnection, useConnect, useDisconnect, useConnectors } from 'wagmi';
+import { AppBar, Toolbar, Typography, Button, Box, Tooltip } from '@mui/material';
 import { NavLink, Link as RouterLink } from 'react-router-dom';
-import { useColorMode } from '../ColorModeContext';
-import { truncateAddress, isSameAddress } from '../lib/format';
-import { ticketAddress, ticketAbi } from '../contracts/ticketNFT';
+import { hardhat } from 'wagmi/chains';
+import { truncateAddress } from '../lib/format';
+import { ctaButtonSx, FONT_DISPLAY, monoLabelSx, tokens } from '../theme';
 
-const BASE_PAGES = [
+const PAGES = [
   { to: '/', label: 'Buy Tickets' },
   { to: '/my-tickets', label: 'My Tickets' },
+  { to: '/organizer', label: 'Organizer' },
 ] as const;
 
 export default function Navbar() {
   const { mutate: connect, isPending: isConnecting } = useConnect();
   const connectors = useConnectors();
-  const { isConnected, address } = useConnection();
+  const { isConnected, address, chainId } = useConnection();
   const { mutate: disconnect } = useDisconnect();
-  const { mode, toggleMode } = useColorMode();
-
-  const { data: contractOwner } = useReadContract({
-    address: ticketAddress,
-    abi: ticketAbi,
-    functionName: 'owner',
-  });
-
-  const isOrganizer = isSameAddress(address, contractOwner as string | undefined);
-  const pages = isOrganizer
-    ? [...BASE_PAGES, { to: '/organizer', label: 'Organizer' }]
-    : BASE_PAGES;
 
   const metaMaskConnector = connectors.find(
     (c) => c.id === 'injected' || c.name === 'MetaMask',
@@ -40,51 +27,61 @@ export default function Navbar() {
       position='sticky'
       color='transparent'
       elevation={0}
-      sx={(theme) => ({
-        backgroundColor:
-          theme.palette.mode === 'dark' ? 'rgba(0, 0, 0, 0.72)' : 'rgba(251, 251, 253, 0.8)',
-        backdropFilter: 'saturate(180%) blur(20px)',
-        WebkitBackdropFilter: 'saturate(180%) blur(20px)',
-        borderBottom: '1px solid',
-        borderColor: 'divider',
-      })}
+      sx={{
+        background: 'rgba(11, 11, 15, 0.72)',
+        backdropFilter: 'saturate(160%) blur(40px)',
+        WebkitBackdropFilter: 'saturate(160%) blur(40px)',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+      }}
     >
       <Toolbar
         sx={{
           justifyContent: 'space-between',
-          minHeight: '52px !important',
+          minHeight: { xs: 60, sm: 68 },
           px: { xs: 2, sm: 3 },
           gap: 2,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 2, sm: 3.5 }, minWidth: 0 }}>
-          <Typography
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 2, md: 4 }, minWidth: 0 }}>
+          <Box
             component={RouterLink}
             to='/'
-            sx={{
-              fontWeight: 600,
-              fontSize: '0.95rem',
-              color: 'text.primary',
-              letterSpacing: '-0.01em',
-              textDecoration: 'none',
-              flexShrink: 0,
-            }}
+            sx={{ display: 'flex', alignItems: 'center', gap: 1.25, textDecoration: 'none' }}
           >
-            TicketChain
-          </Typography>
+            <BrandMark />
+            <Typography
+              sx={{
+                fontFamily: FONT_DISPLAY,
+                fontWeight: 700,
+                fontSize: '1.15rem',
+                letterSpacing: '-0.02em',
+                color: 'text.primary',
+                textShadow: '0 0 18px rgba(153, 69, 255, 0.45)',
+                display: { xs: 'none', sm: 'block' },
+              }}
+            >
+              TicketChain
+            </Typography>
+          </Box>
 
-          <Box component='nav' sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1.5, sm: 2.5 } }}>
-            {pages.map((page) => (
+          <Box
+            component='nav'
+            sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1.5, sm: 3 } }}
+          >
+            {PAGES.map((page) => (
               <NavLink key={page.to} to={page.to} end style={{ textDecoration: 'none' }}>
                 {({ isActive }) => (
                   <Typography
                     sx={{
-                      fontSize: '0.85rem',
-                      fontWeight: isActive ? 600 : 400,
-                      color: isActive ? 'text.primary' : 'text.secondary',
+                      ...monoLabelSx,
+                      textTransform: 'uppercase',
+                      color: isActive ? tokens.violetBright : tokens.outline,
+                      borderBottom: '1px solid',
+                      borderColor: isActive ? tokens.violet : 'transparent',
+                      pb: 0.5,
                       whiteSpace: 'nowrap',
-                      transition: 'color 0.15s ease',
-                      '&:hover': { color: 'text.primary' },
+                      transition: 'color 0.15s ease, border-color 0.15s ease',
+                      '&:hover': { color: tokens.onSurface },
                     }}
                   >
                     {page.label}
@@ -95,70 +92,114 @@ export default function Navbar() {
           </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 } }}>
-          <IconButton
-            size='small'
-            onClick={toggleMode}
-            aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            sx={{ color: 'text.secondary' }}
-          >
-            {mode === 'dark' ? (
-              <LightModeOutlinedIcon fontSize='small' />
-            ) : (
-              <DarkModeOutlinedIcon fontSize='small' />
-            )}
-          </IconButton>
-
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           {isConnected ? (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 } }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'success.main' }} />
-                <Typography
-                  title={address}
-                  sx={{
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                    fontSize: '0.82rem',
-                    color: 'text.secondary',
-                    display: { xs: 'none', sm: 'block' },
-                  }}
-                >
-                  {truncateAddress(address)}
-                </Typography>
-              </Box>
+            <>
+              <WalletChip address={address} chainId={chainId} />
               <Button
-                size='small'
                 onClick={() => disconnect()}
                 sx={{
-                  color: 'text.secondary',
+                  ...monoLabelSx,
+                  textTransform: 'uppercase',
+                  color: tokens.outline,
                   minWidth: 'auto',
                   px: 1.5,
-                  '&:hover': { color: 'error.main', backgroundColor: 'transparent' },
+                  '&:hover': { color: tokens.error, bgcolor: 'transparent' },
                 }}
               >
                 Sign out
               </Button>
-            </Box>
+            </>
           ) : metaMaskConnector ? (
             <Button
               variant='contained'
-              disableElevation
               disabled={isConnecting}
               onClick={() => connect({ connector: metaMaskConnector })}
-              sx={{
-                bgcolor: 'text.primary',
-                color: 'background.default',
-                '&:hover': { bgcolor: 'text.primary', opacity: 0.85 },
-              }}
+              sx={ctaButtonSx(false, isConnecting)}
             >
               {isConnecting ? 'Connecting…' : 'Connect Wallet'}
             </Button>
           ) : (
-            <Typography sx={{ color: 'text.secondary', fontSize: '0.85rem' }}>
+            <Typography sx={{ ...monoLabelSx, color: tokens.error }}>
               MetaMask not installed
             </Typography>
           )}
         </Box>
       </Toolbar>
     </AppBar>
+  );
+}
+
+/** Wallet connector: mono address plus a network-status indicator. */
+function WalletChip({ address, chainId }: { address?: string; chainId?: number }) {
+  const isExpectedNetwork = chainId === hardhat.id;
+  const indicator = isExpectedNetwork ? tokens.cyan : tokens.orange;
+
+  return (
+    <Tooltip
+      title={
+        isExpectedNetwork
+          ? `${address} · Hardhat local (${hardhat.id})`
+          : `${address} · wrong network (${chainId ?? 'unknown'})`
+      }
+      placement='bottom-end'
+    >
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          px: 1.5,
+          py: 0.75,
+          borderRadius: '4px',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          bgcolor: 'rgba(0, 0, 0, 0.3)',
+        }}
+      >
+        <Box
+          sx={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            bgcolor: indicator,
+            boxShadow: `0 0 8px ${indicator}`,
+          }}
+        />
+        <Typography sx={{ ...monoLabelSx, color: 'text.primary' }}>
+          {truncateAddress(address)}
+        </Typography>
+      </Box>
+    </Tooltip>
+  );
+}
+
+/** A chain-link glyph in the brand violet, glowing against the void. */
+function BrandMark() {
+  return (
+    <Box
+      sx={{
+        width: 30,
+        height: 30,
+        display: 'grid',
+        placeItems: 'center',
+        borderRadius: '8px',
+        border: '1px solid rgba(153, 69, 255, 0.5)',
+        background: 'linear-gradient(135deg, rgba(153, 69, 255, 0.35), rgba(153, 69, 255, 0.05))',
+        boxShadow: '0 0 18px rgba(153, 69, 255, 0.35)',
+        flexShrink: 0,
+      }}
+    >
+      <Box
+        component='svg'
+        viewBox='0 0 24 24'
+        aria-hidden
+        sx={{ width: 16, height: 16, fill: 'none', stroke: tokens.violetBright, strokeWidth: 2 }}
+      >
+        <path
+          d='M9.5 14.5 14.5 9.5M8 12l-1.8 1.8a3.4 3.4 0 0 0 4.8 4.8L12.8 17M11.2 7l1.8-1.8a3.4 3.4 0 0 1 4.8 4.8L16 11.8'
+          strokeLinecap='round'
+        />
+      </Box>
+    </Box>
   );
 }
