@@ -13,8 +13,13 @@ Week 2 additions:
   - HTTP API on http://127.0.0.1:8080 (FastAPI/uvicorn) exposing
     GET /tickets for the React frontend.
 
+Ethereum bridge:
+  - bridge.py watches the TicketNFT contract on the local Hardhat node and
+    republishes every ticket event into this node's chain, so GET /tickets
+    reflects on-chain purchases, listings, and cancellations live.
+
 Usage:
-    python main.py [port] [--event EVENT_NAME] [--seed N]
+    python main.py [port] [--event EVENT_NAME]
 """
 
 import argparse
@@ -56,16 +61,13 @@ from blockchain import (
     Block,
     Blockchain,
     Transaction,
-    generate_keypair,
     solve_puzzle,
     verify_puzzle,
 )
+from bridge import ContractEventBridge
 
 DEFAULT_PORT = 8090
 DEFAULT_EVENT = "default-event"
-
-# Face value of a ticket in wei — matches TicketNFT.FACE_VALUE (0.05 ether).
-FACE_VALUE_WEI = 50_000_000_000_000_000
 
 # Bootstrap via UDP broadcast only: peers are discovered on the local
 # network, keeping the development overlay isolated from public trackers.
@@ -285,6 +287,13 @@ class TicketChainCommunity(Community, PeerObserver):
         # Temporarily append and validate the whole chain
         self.blockchain.chain.append(block)
         if self.blockchain.is_chain_valid():
+            # Drop the block's transactions from our mempool: they were also
+            # broadcast individually, and keeping them would show every ticket
+            # twice in the feed (Confirmed from the block + Pending forever).
+            included = {tx.tx_hash() for tx in block.transactions}
+            self.blockchain.mempool = [
+                tx for tx in self.blockchain.mempool if tx.tx_hash() not in included
+            ]
             print(
                 f"[{self._tag()}] rx block #{block.header.index} "
                 f"hash={block.block_hash()[:12]}… from {peer} → appended"
@@ -338,38 +347,19 @@ async def start_api_server(community: TicketChainCommunity) -> asyncio.Task:
     return task
 
 
-def seed_tickets(community: TicketChainCommunity, count: int) -> None:
-    """Publish *count* ticket offerings for token IDs 0..count-1 and mine them.
+def start_bridge(community: TicketChainCommunity) -> asyncio.Task:
+    """Start the Ethereum→P2P event bridge as a background asyncio task.
 
-    Local development only. A freshly started node has an empty chain, so
-    GET /tickets returns nothing and the frontend grid stays empty. The token
-    IDs deliberately match the ones contracts/scripts/deploy.js mints, so each
-    card in the UI resolves against a ticket that exists on the Ethereum side.
+    The task reference is kept on the community so it is not garbage
+    collected; bridge.run() retries internally when the Hardhat node is
+    not up yet, so this never crashes the P2P node.
     """
-    if count <= 0:
-        return
-
-    seller_key, seller = generate_keypair()
-    _, buyer = generate_keypair()
-
-    for token_id in range(count):
-        tx = Transaction(
-            sender=seller,
-            recipient=buyer,
-            ticket_id=str(token_id),
-            price=FACE_VALUE_WEI,
-            face_value=FACE_VALUE_WEI,
-        )
-        tx.sign(seller_key)
-        community.submit_transaction(tx)
-
-    community.mine_block()
-    print(f"Seeded {count} ticket offering(s) for token IDs 0..{count - 1}")
+    task = asyncio.create_task(ContractEventBridge(community).run())
+    community.bridge_task = task
+    return task
 
 
-async def start_node(
-    port: int = DEFAULT_PORT, event: str = DEFAULT_EVENT, seed: int = 0
-) -> IPv8:
+async def start_node(port: int = DEFAULT_PORT, event: str = DEFAULT_EVENT) -> IPv8:
     # Localized Peer Community Broadcasting: partition the overlay by event.
     TicketChainCommunity.community_id = event_community_id(event)
 
@@ -384,8 +374,8 @@ async def start_node(
     community = next(
         o for o in ipv8.overlays if isinstance(o, TicketChainCommunity)
     )
-    seed_tickets(community, seed)
     await start_api_server(community)
+    start_bridge(community)
     return ipv8
 
 
@@ -401,18 +391,12 @@ def parse_args() -> argparse.Namespace:
              f"(default {DEFAULT_EVENT!r}). Nodes only exchange messages "
              "with peers using the same event name.",
     )
-    parser.add_argument(
-        "--seed", type=int, default=0, metavar="N",
-        help="Local development: publish and mine N ticket offerings for "
-             "token IDs 0..N-1 at startup, matching the tickets minted by "
-             "the Hardhat deploy script (default 0 — no seeding).",
-    )
     return parser.parse_args()
 
 
 async def main() -> None:
     args = parse_args()
-    await start_node(args.port, args.event, args.seed)
+    await start_node(args.port, args.event)
     await run_forever()
 
 

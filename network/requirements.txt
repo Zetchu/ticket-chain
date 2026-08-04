@@ -6,3 +6,6 @@ uvicorn[standard]==0.35.0
 # Test-only: starlette.testclient (used by test_blockchain.py::TestAPI) requires
 # httpx even though the app itself never imports it.
 httpx==0.28.1
+# Ethereum bridge: watches TicketNFT contract events on the local Hardhat
+# node and republishes them into the P2P chain (see bridge.py).
+web3==7.16.0
