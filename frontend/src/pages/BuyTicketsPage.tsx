@@ -4,6 +4,7 @@ import TicketGrid, { TicketGridSkeleton } from '../components/TicketGrid';
 import StatePanel from '../components/StatePanel';
 import FeedErrorPanel from '../components/FeedErrorPanel';
 import PageHeader from '../components/PageHeader';
+import StatusChip from '../components/StatusChip';
 import { useTicketBoard } from '../hooks/useTicketBoard';
 
 export default function BuyTicketsPage() {
@@ -15,8 +16,16 @@ export default function BuyTicketsPage() {
   return (
     <Box component='section'>
       <PageHeader
-        title='Buy Tickets'
-        subtitle='Tickets on the local P2P network, capped at their original face value. Your own tickets show up here once you list them for resale.'
+        title='Available Passes'
+        subtitle='Every ticket on the local P2P network, capped at its original face value. Your own tickets appear here once you list them for resale.'
+        action={
+          !isPending && !isError ? (
+            <StatusChip
+              tone={listedCount > 0 ? 'cyan' : 'neutral'}
+              label={`${listedCount} for sale · ${market.length} on network`}
+            />
+          ) : undefined
+        }
       />
 
       {isPending ? (
@@ -26,7 +35,7 @@ export default function BuyTicketsPage() {
       ) : market.length > 0 ? (
         <>
           {listedCount === 0 && (
-            <Typography sx={{ fontSize: '0.88rem', color: 'text.secondary', mb: 2.5 }}>
+            <Typography sx={{ fontSize: '0.9rem', color: 'text.secondary', mb: 2.5 }}>
               Nothing is currently for sale — no owner has listed a ticket yet.
             </Typography>
           )}
@@ -44,8 +53,8 @@ export default function BuyTicketsPage() {
         />
       ) : (
         <StatePanel
-          title='No tickets discovered yet'
-          description='The P2P node has not seen any ticket offerings on the local network.'
+          title='No tickets minted yet'
+          description='The organizer has not issued any tickets on this network. Connect the organizer wallet and mint a batch from the Organizer page.'
         />
       )}
     </Box>

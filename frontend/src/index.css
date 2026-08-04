@@ -1,5 +1,5 @@
-/* color-scheme is set dynamically by MuiCssBaseline (see theme.ts) so native
-   form controls and scrollbars follow the in-app light/dark toggle. */
+/* Base document styling. Everything else — palette, grid background, type —
+   comes from the Luminous Protocol theme in theme.ts. */
 
 * {
   box-sizing: border-box;
@@ -13,8 +13,28 @@ html {
 
 body {
   margin: 0;
+  min-height: 100vh;
 }
 
 ::selection {
-  background: rgba(0, 113, 227, 0.15);
+  background: rgba(153, 69, 255, 0.35);
+}
+
+/* Keep the scrollbar on-surface rather than reverting to the browser default. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b0b0f;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a292e;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4c4355;
 }

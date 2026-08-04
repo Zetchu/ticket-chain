@@ -14,8 +14,9 @@ export default function MyTicketsPage() {
   return (
     <Box component='section'>
       <PageHeader
+        align='center'
         title='My Tickets'
-        subtitle='Tickets held by this wallet. Listing one offers it for resale at or below face value.'
+        subtitle='Passes held by this wallet. Listing one offers it for resale at or below face value.'
       />
 
       {!isConnected ? (

@@ -1,7 +1,7 @@
 import { Button } from '@mui/material';
 import { useConnect, useConnectors } from 'wagmi';
 import StatePanel from './StatePanel';
-import { filledButtonSx } from '../theme';
+import { ctaButtonSx } from '../theme';
 
 /** Shown where a page needs a wallet that isn't connected yet. */
 export default function ConnectPrompt({ message }: { message: string }) {
@@ -22,7 +22,7 @@ export default function ConnectPrompt({ message }: { message: string }) {
             disableElevation
             disabled={isPending}
             onClick={() => connect({ connector: injectedConnector })}
-            sx={{ ...filledButtonSx(false, isPending), px: 3, width: 'auto' }}
+            sx={{ ...ctaButtonSx(false, isPending), px: 3, width: 'auto' }}
           >
             {isPending ? 'Connecting…' : 'Connect Wallet'}
           </Button>

@@ -1,6 +1,7 @@
 import { Alert, Snackbar, Link as MuiLink } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import { readableError } from '../lib/format';
+import { glassPanelSx, monoLabelSx } from '../theme';
 import type { TicketAction } from '../hooks/useTicketWrite';
 
 const ACTION_NOUN: Record<TicketAction, string> = {
@@ -40,7 +41,7 @@ export default function TransactionSnackbar({
           severity='error'
           variant='outlined'
           onClose={onClose}
-          sx={{ bgcolor: 'background.paper' }}
+          sx={{ ...glassPanelSx, ...monoLabelSx, alignItems: 'center' }}
         >
           {noun} failed — {readableError(error)}
         </Alert>
@@ -49,7 +50,7 @@ export default function TransactionSnackbar({
           severity='success'
           variant='outlined'
           onClose={onClose}
-          sx={{ bgcolor: 'background.paper' }}
+          sx={{ ...glassPanelSx, ...monoLabelSx, alignItems: 'center' }}
         >
           {noun} confirmed — {hash?.slice(0, 6)}…{hash?.slice(-4)}
           {action === 'buy' && (
@@ -62,7 +63,11 @@ export default function TransactionSnackbar({
           )}
         </Alert>
       ) : (
-        <Alert severity='info' variant='outlined' sx={{ bgcolor: 'background.paper' }}>
+        <Alert
+          severity='info'
+          variant='outlined'
+          sx={{ ...glassPanelSx, ...monoLabelSx, alignItems: 'center' }}
+        >
           Waiting for confirmation…
         </Alert>
       )}
