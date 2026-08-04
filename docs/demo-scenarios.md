@@ -19,17 +19,21 @@ exact commands and output below are real, not illustrative.
 ```
 
 This brings up, in order: the local Hardhat node (`:8545`), a fresh
-`TicketNFT` deployment seeded with 3 tickets (token IDs `0`, `1`, `2`) minted
-to Hardhat's account `#1`, the PyIPv8 P2P node with its HTTP API (`:8080`),
+`TicketNFT` deployment, the PyIPv8 P2P node with its HTTP API (`:8080`),
 and the React frontend (`:5173`). Wait for `✅ All systems running!` before
 continuing — the frontend retries its first `/tickets` fetch twice, but the
 Hardhat node genuinely needs to be up before the deploy step runs.
+
+The P2P node's event bridge (`network/bridge.py`) watches the deployed
+contract, so every mint, listing, cancellation, and purchase lands in the
+P2P feed automatically — mint tickets from the organizer panel and they
+appear in the grid with no manual seeding step.
 
 > **Windows note:** `start_dev.sh` is written for macOS/Linux (it symlinks
 > `libsodium` from Homebrew for pyipv8). On Windows, run the three
 > services manually in separate shells instead — `npx hardhat node` and
 > `npx hardhat run scripts/deploy.js --network localhost` in `contracts/`,
-> `python main.py --seed 3` in `network/` (see the venv/libsodium notes in
+> `python main.py` in `network/` (see the venv/libsodium notes in
 > this doc's [Troubleshooting](#troubleshooting) section), and `npm run dev`
 > in `frontend/`.
 
@@ -42,7 +46,8 @@ Hardhat node genuinely needs to be up before the deploy step runs.
 2. Import at least two of the private keys `npx hardhat node` prints to the
    terminal on startup (Hardhat's well-known local dev accounts — never
    reuse these outside a local chain):
-   - **Account #1** — holds the 3 seed tickets (the "seller" for this demo).
+   - **Account #1** — the "seller" for this demo (mint it tickets from the
+     organizer panel, or transfer it some).
    - **Account #2** (or any other) — the "buyer" for the Sunny Day purchase.
      It must be a *different* account than the ticket's current owner:
      `resaleTransfer` reverts with `"Cannot buy your own ticket"` otherwise.
@@ -88,19 +93,6 @@ npx hardhat console --network localhost
 > await c.ownerOf(0)   // now the buyer's address, not the original holder
 > await c.getTicketDetails(0)   // still exactly 50000000000000000 (0.05 ETH)
 ```
-
-### Known limitation worth stating out loud
-
-The **Available Events** grid is fed by the P2P node's own local chain
-(seeded once at startup — see `main.py`'s `seed_tickets()`), not by contract
-events. A purchase through the UI changes on-chain ownership correctly, but
-it is **not** currently broadcast into the P2P layer — the grid will keep
-showing the ticket at its original listing after a purchase. Ownership and
-price are always correct (they're read live from the contract on every
-card); only the P2P "availability" feed doesn't yet reflect on-chain sales.
-This is a gap between the two layers worth calling out rather than
-glossing over, since the architecture doc describes them as more tightly
-coupled than the current code wires them.
 
 ## 2. 🌧️ Rainy Day — Blocked Scalping Attempt
 

@@ -14,6 +14,7 @@ expects: {id, type, price, title, location, date}.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
 from fastapi import FastAPI
@@ -22,7 +23,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from blockchain import Blockchain, Transaction
 
 API_HOST = "127.0.0.1"
-API_PORT = 8080
+# Overridable so a second node on the same machine can serve its own feed
+# (e.g. TICKETCHAIN_API_PORT=8081 python main.py 8091).
+API_PORT = int(os.environ.get("TICKETCHAIN_API_PORT", "8080"))
 
 # Vite dev server origins allowed to call this API.
 #
