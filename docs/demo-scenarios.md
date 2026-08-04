@@ -66,25 +66,37 @@ original face value.
 
 ### Steps
 
-1. Open `http://localhost:5173`. The **Available Events** grid loads from
-   the P2P node's `GET /tickets` (port 8080) — you should see 3 cards
-   (tokens `0`–`2`), each showing `0.05 ETH`, read live on-chain via
-   `getTicketDetails`.
-2. Click **Connect** in the navbar and select the **buyer** account
-   (Account #2) in MetaMask.
-3. On any ticket card, click **Purchase Ticket**.
-4. MetaMask opens a confirmation prompt for `resaleTransfer(tokenId)` with
-   `value = 0.05 ETH` (the button is disabled until the on-chain price has
-   loaded, so it can never send a stale amount). Confirm it.
-5. The card's button cycles **Confirm in Wallet… → Waiting for Block… →
-   Purchased!** as `useWaitForTransactionReceipt` picks up the mined
-   transaction; a snackbar shows the tx hash.
+1. Open `http://localhost:5173` and connect the **organizer** account
+   (Account #0) — the **Organizer** page appears in the nav. A freshly started
+   stack has no tickets: nothing is seeded, so everything on screen from here on
+   was minted live in front of the audience.
+2. On **Organizer**, enter an event name and date, set the quantity to 3, and
+   click **Mint & List**. One transaction creates the event, mints the batch to
+   the organizer, and lists every ticket at the `0.05 ETH` face value.
+3. Go to **Buy Tickets**. The three cards are already there — the grid
+   enumerates tokens from `totalMinted()` on the contract, so it does not wait
+   on the P2P node. Within a couple of seconds `[bridge]` lines appear in
+   `network.log` and the same tickets show up in `GET /tickets`.
+4. Switch MetaMask to the **buyer** account (Account #1 or #2). The organizer's
+   tickets now show a **Buy Ticket** button — the contract refuses to let you
+   buy your own ticket, so the button only becomes active on another account.
+5. Click **Buy Ticket**. MetaMask opens a confirmation for
+   `resaleTransfer(tokenId)` with `value` equal to the listed price (the button
+   stays disabled until that price has loaded, so it can never send a stale
+   amount). Confirm it.
+6. The button cycles **Confirm in wallet… → Processing… → Purchased** as
+   `useWaitForTransactionReceipt` picks up the mined transaction; a snackbar
+   shows the tx hash. The card moves to **My Tickets**, and the bridge
+   republishes the transfer to the P2P chain.
 
 ### What to point out live
 
-- The price shown never changes across owners — it's read from
-  `getTicketDetails`, which always returns the immutable `FACE_VALUE` set at
-  minting, not a "current market price."
+- The price is never a "current market price": a listed card shows the seller's
+  asking price, and an unlisted one shows `getTicketDetails`, the immutable
+  `FACE_VALUE` fixed at minting. Neither can exceed face value, however many
+  times the ticket changes hands.
+- Nothing on screen was seeded. Every ticket in the demo was minted live, and
+  the P2P feed filled itself from contract events through the bridge.
 - On a local Hardhat node every transaction auto-mines into its own block,
   so step 4→5 above is near-instant. Measured directly (script-driven, same
   call the UI makes): **submit → receipt in 24 ms, 78,534 gas** — see
@@ -102,12 +114,21 @@ npx hardhat console --network localhost
 
 ## 2. 🌧️ Rainy Day — Blocked Scalping Attempt
 
-**Story:** a scalper tries to resell a ticket above face value. The UI
-itself can't be used to attempt this — `handlePurchase` in
-`TicketCard.tsx` always sends exactly the on-chain `getTicketDetails`
-price, by construction. A real scalper has to go around the UI and call
-the contract directly, so that's what this demo does, via
+**Story:** a scalper tries to resell a ticket above face value. There are two
+ways to attempt it, and the contract refuses both — at *different* points in
+the ticket's lifecycle.
+
+The UI can't be used for either. The listing form caps the asking price at face
+value and disables submission above it; the buy button always sends exactly the
+listed price. A real scalper has to go around the frontend and call the contract
+directly, so that's what this demo does, via
 [`contracts/scripts/demo-rainy-day.js`](../contracts/scripts/demo-rainy-day.js).
+
+1. **Advertising above face value** — `listForSale` rejects it, so an
+   over-priced offer can never even appear on the marketplace.
+2. **Overpaying a legitimate listing** — `resaleTransfer` requires `msg.value`
+   to equal the listed price exactly, so a buyer can't quietly pay a seller more
+   than the published price (and can't underpay either).
 
 ### Steps
 
@@ -119,27 +140,39 @@ TICKET_ID=0 npx hardhat run scripts/demo-rainy-day.js --network localhost
 ### Actual output (captured while verifying this doc)
 
 ```
-Contract:        0x5FbDB2315678afecb367f032d93F642f64180aa3
-Ticket #0 owned by: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+Contract:        0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0
+Ticket #0 owned by: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 Face value:      0.05 ETH
-Scalper offers:  0.15 ETH (from 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC)
+Listed at:       0.05 ETH
+Markup attempt:  0.15 ETH (3x face value)
 
-Submitting resaleTransfer() at the marked-up price...
-REVERTED as expected:
-  reason: Error: VM Exception while processing transaction: reverted with
-  reason string 'Scalping detected: Price exceeds face value'
+[1] Holder submits listForSale() above face value...
+    REVERTED as expected: Scalping detected: Price exceeds face value
 
-Ticket #0 owner unchanged: YES
+[2] Buyer submits resaleTransfer() with a marked-up msg.value...
+    buyer: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+    REVERTED as expected: Payment must equal the listed price
+
+Ticket #0 owner unchanged:   YES
+Ticket #0 listing unchanged: YES (0.05 ETH)
 ```
 
 ### What to point out live
 
-- The scalper offered **3× face value** (a deliberately obvious markup for
-  the audience) and the *entire* transaction reverted — no partial state
-  change, no ETH moved, ownership unchanged. This is enforced in
-  [`TicketNFT.sol`](../contracts/contracts/TicketNFT.sol)'s `resaleTransfer`:
-  `require(msg.value <= ticket.faceValue, "Scalping detected: Price exceeds
-  face value")`.
+- The scalper attempted **3× face value** (a deliberately obvious markup for
+  the audience) and *both* transactions reverted entirely — no partial state
+  change, no ETH moved, ownership and listing untouched.
+- The two guards sit at deliberately different points, in
+  [`TicketNFT.sol`](../contracts/contracts/TicketNFT.sol):
+  `listForSale` has `require(price <= tickets[tokenId].faceValue, "Scalping
+  detected: Price exceeds face value")`, so the ceiling applies when the offer
+  is *made*; `resaleTransfer` then has `require(msg.value == listing.price,
+  "Payment must equal the listed price")`, pinning the sale to that published
+  price in both directions.
+- Worth saying out loud: an earlier version only checked the payment, with
+  `msg.value <= faceValue`. That refused overpayment but allowed a buyer to
+  take any ticket for **zero** — the story is in
+  [`development-process.md`](development-process.md).
 - Raw ERC-721 transfers (`transferFrom`/`safeTransferFrom`) are blocked
   entirely, even for the ticket's own owner or an approved operator — see
   the "Unauthorized transfers" test group in
@@ -241,19 +274,22 @@ not a single lucky run.
 
 Both scenarios are also covered by the automated suite in
 [`contracts/test/TicketNFT.test.js`](../contracts/test/TicketNFT.test.js)
-(25 tests: minting, `getTicketDetails`, `setResellable` access control,
-face-value resale, unauthorized/approved-bypass attempts, and the raw
-ERC-721 lockdown). Run `npm test` in `contracts/` — or `npx hardhat
-coverage` for the line/branch numbers — to reproduce:
+(53 tests: minting and organizer-only access control, the event registry,
+listing and cancellation including refusal above face value, purchase covering
+exact/over/under payment and unlisted or cancelled tickets, the failed-payment
+branch via a mock that rejects ETH, and the raw ERC-721 lockdown). Run
+`npx hardhat test` in `contracts/` — or `npx hardhat coverage` for the
+line/branch numbers — to reproduce:
 
 ```
-25 passing (722ms)
+53 passing (439ms)
 
---------------- | -------- | -------- | -------- | -------- |
-File            | % Stmts  | % Branch | % Funcs  | % Lines  |
---------------- | -------- | -------- | -------- | -------- |
- TicketNFT.sol  |     100  |     100  |     100  |     100  |
---------------- | -------- | -------- | -------- | -------- |
+-------------------|----------|----------|----------|----------|
+File               |  % Stmts | % Branch |  % Funcs |  % Lines |
+-------------------|----------|----------|----------|----------|
+  TicketNFT.sol    |      100 |    97.37 |      100 |      100 |
+  RejectsEther.sol |      100 |      100 |      100 |      100 |
+-------------------|----------|----------|----------|----------|
 ```
 
 ## Reference: metrics

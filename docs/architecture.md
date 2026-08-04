@@ -30,15 +30,20 @@ flowchart TB
         end
         A["Node A :8090<br/>TicketChainCommunity"]
         B["Node B :8091<br/>TicketChainCommunity"]
-        A <-- "UDP broadcast discovery<br/>TransactionPayload / BlockPayload" --> B
+        A <-- "UDP broadcast discovery<br/>Transaction / Block / ChainRequest<br/>/ ChainResponse payloads" --> B
         BC -- "shared instance per node" --> A
         BC -- "shared instance per node" --> B
+        API["HTTP API :8080<br/>FastAPI — GET /tickets, /health"]
+        A -- "reads its live chain" --> API
     end
 
+    Bridge["Contract event bridge<br/>(network/bridge.py, web3.py)"]
+
     Wallet -- "signed transactions (JSON-RPC)" --> Node
-    UI -- "read ticket state (ethers.js)" --> Node
-    SC -- "mint / transfer events" --> P2P
-    P2P -- "propagate availability to local peers" --> UI
+    UI -- "read ticket state (wagmi/viem)" --> Node
+    SC -- "TicketMinted / Listed / Unlisted / Transferred" --> Bridge
+    Bridge -- "signed Transaction → mempool → mined block" --> P2P
+    API -- "ticket feed (HTTP)" --> UI
 ```
 
 ## Flow summary
@@ -47,21 +52,35 @@ flowchart TB
 2. Minting and transfers are signed in the wallet and sent to the local
    Hardhat node over JSON-RPC, where `TicketNFT.sol` enforces the
    face-value price ceiling (anti-scalping).
-3. Off-chain ticket transfers are represented as `Transaction` objects,
-   signed with SECP256K1 ECDSA. Each transaction carries `price` and
-   `face_value` fields; the anti-scalping rule (`price ≤ face_value`) is
+3. Each state change on the contract emits an event. `bridge.py` polls the
+   Hardhat node for `TicketMinted`, `TicketListed`, `TicketUnlisted` and
+   `TicketTransferred`, and turns every one into a `Transaction` object on the
+   P2P side — this is the link between the two ledgers, so the peer-replicated
+   chain records what actually happened on Ethereum rather than a parallel
+   history.
+4. Those `Transaction` objects are signed with SECP256K1 ECDSA and carry
+   `price` and `face_value`; the anti-scalping rule (`price ≤ face_value`) is
    enforced during validation before a transaction enters the mempool.
-4. When enough transactions accumulate, a node calls `mine_block()`:
+5. Once a batch of events has been published, the node calls `mine_block()`:
    - A `MerkleTree` is built over all pending transaction hashes.
    - A new `Block` is created with the Merkle root, the previous block's
      hash, and a difficulty target.
    - The PoW miner increments a nonce until the SHA-256 block hash has the
      required number of leading zero bits (default: 16 bits).
    - The mined block is broadcast to all peers as a `BlockPayload`.
-5. Receiving peers validate the full chain (PoW, prev-hash linkage, Merkle
+6. Receiving peers validate the full chain (PoW, prev-hash linkage, Merkle
    root, all signatures) before appending the block.
-6. The `TicketChainCommunity` overlay uses IPv8's UDP broadcast bootstrapping
-   for peer discovery — no public trackers, keeping the network localized.
+7. A peer that is behind — it missed a packet, or joined late — asks for the
+   sender's chain with a `ChainRequestPayload` and adopts the reply only if it
+   is strictly longer, shares our genesis block, and validates completely
+   (`Blockchain.should_replace_with`). Without this a node that missed a single
+   block could never catch up.
+8. The `TicketChainCommunity` overlay uses IPv8's UDP broadcast bootstrapping
+   for peer discovery — no public trackers, keeping the network localized. The
+   overlay's `community_id` is derived from the event name, so nodes for
+   different events form disjoint networks.
+9. The node serves its live chain over HTTP (`GET /tickets`, `GET /health`),
+   which is what the frontend reads for the P2P view of ticket availability.
 
 ## Blockchain core module layout
 
@@ -73,7 +92,16 @@ network/
     merkle.py         — MerkleTree, merkle_root(), get_proof(), verify_proof()
     block.py          — BlockHeader, Block, genesis_block()
     pow.py            — mine(), verify_pow(), meets_difficulty()
-    chain.py          — Blockchain (mempool, mine_pending, is_chain_valid)
-  test_blockchain.py  — 33 pytest tests (transactions, Merkle, PoW, chain)
-  main.py             — IPv8 node with TicketChainCommunity + broadcast payloads
+    puzzle.py         — per-message search puzzle (solve/verify), Sybil resistance
+    chain.py          — Blockchain (mempool, mine_pending, is_chain_valid,
+                        should_replace_with — the longest-valid-chain rule)
+  main.py             — IPv8 node: TicketChainCommunity, message payloads,
+                        chain sync, node startup
+  bridge.py           — watches TicketNFT events and republishes them as
+                        signed P2P transactions
+  api.py              — FastAPI app serving GET /tickets and GET /health
+  benchmark.py        — transaction, block-finality and P2P latency benchmarks
+  test_blockchain.py  — 54 pytest tests (transactions, Merkle, PoW, chain,
+                        puzzle, chain sync, HTTP API)
+  test_two_nodes.py   — live two-node discovery and chain-convergence test
 ```
