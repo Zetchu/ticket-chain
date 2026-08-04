@@ -27,6 +27,7 @@ import asyncio
 import hashlib
 import json
 import sys
+import time
 from asyncio import run
 
 # The status logs below use non-ASCII arrows/ellipses (→, …). On Windows the
@@ -68,6 +69,11 @@ from bridge import ContractEventBridge
 
 DEFAULT_PORT = 8090
 DEFAULT_EVENT = "default-event"
+
+# How often a node re-requests chains from every peer it currently knows
+# about, as a backstop alongside the event-driven triggers (on discovery,
+# on a block arriving ahead of our index). See _periodic_chain_sync.
+CHAIN_SYNC_INTERVAL = 15.0
 
 # Bootstrap via UDP broadcast only: peers are discovered on the local
 # network, keeping the development overlay isolated from public trackers.
@@ -170,6 +176,55 @@ class BlockPayload(VariablePayload):
         return verify_puzzle(self.data, self.puzzle_nonce)
 
 
+@vp_compile
+class ChainRequestPayload(VariablePayload):
+    """Ask a peer to send back their full chain (see ChainResponsePayload).
+
+    Sent on peer discovery (so a late joiner catches up) and whenever a
+    received block is ahead of our own chain (so a missed broadcast doesn't
+    strand us permanently behind). Carries a timestamp purely so every
+    request's search puzzle is solved fresh — with no per-instance data,
+    the puzzle solution for "please send your chain" would be a constant
+    any node could compute once and replay forever, defeating the
+    per-message cost the puzzle is meant to impose.
+    """
+    msg_id = 3
+    format_list = ["varlenH", "Q"]
+    names = ["data", "puzzle_nonce"]
+
+    @classmethod
+    def create(cls) -> "ChainRequestPayload":
+        data = json.dumps({"requested_at": time.time()}).encode()
+        nonce = solve_puzzle(data)
+        return cls(data, nonce)
+
+    def puzzle_ok(self) -> bool:
+        return verify_puzzle(self.data, self.puzzle_nonce)
+
+
+@vp_compile
+class ChainResponsePayload(VariablePayload):
+    """Carries a peer's full chain (Blockchain.to_dict()) plus its search
+    puzzle nonce, sent in reply to a ChainRequestPayload."""
+    msg_id = 4
+    # 'varlenI': a whole chain can run well past the 65KB a single block's
+    # 'varlenH' allows for, so this gets the wider 4-byte length prefix.
+    format_list = ["varlenI", "Q"]
+    names = ["data", "puzzle_nonce"]
+
+    @classmethod
+    def from_chain(cls, blockchain: Blockchain) -> "ChainResponsePayload":
+        data = json.dumps(blockchain.to_dict()).encode()
+        nonce = solve_puzzle(data)
+        return cls(data, nonce)
+
+    def to_chain(self) -> Blockchain:
+        return Blockchain.from_dict(json.loads(self.data))
+
+    def puzzle_ok(self) -> bool:
+        return verify_puzzle(self.data, self.puzzle_nonce)
+
+
 # ---------------------------------------------------------------------------
 # Community
 # ---------------------------------------------------------------------------
@@ -195,6 +250,13 @@ class TicketChainCommunity(Community, PeerObserver):
         # Register message handlers
         self.add_message_handler(TransactionPayload, self._on_transaction)
         self.add_message_handler(BlockPayload, self._on_block)
+        self.add_message_handler(ChainRequestPayload, self._on_chain_request)
+        self.add_message_handler(ChainResponsePayload, self._on_chain_response)
+
+        # Backstop for chain sync — see _periodic_chain_sync.
+        self.register_task(
+            "periodic_chain_sync", self._periodic_chain_sync, interval=CHAIN_SYNC_INTERVAL
+        )
 
     # ------------------------------------------------------------------
     # Peer lifecycle
@@ -202,6 +264,15 @@ class TicketChainCommunity(Community, PeerObserver):
 
     def on_peer_added(self, peer: Peer) -> None:
         print(f"[{self._tag()}] discovered peer: {peer}")
+        # Catch up a late joiner (or recover from a chain we quietly missed
+        # blocks on): ask whoever we just met for their chain. Asking every
+        # newly-met peer, rather than picking one at random out of all known
+        # peers, keeps this a one-liner without a peer list to sample from —
+        # for the small local meshes this network runs on the two amount to
+        # the same thing, and _maybe_adopt_chain() below only actually
+        # replaces anything if the reply is both longer and valid, so extra
+        # requests are wasted bandwidth at worst, not a correctness risk.
+        self.ez_send(peer, ChainRequestPayload.create())
 
     def on_peer_removed(self, peer: Peer) -> None:
         print(f"[{self._tag()}] lost peer: {peer}")
@@ -278,10 +349,24 @@ class TicketChainCommunity(Community, PeerObserver):
         # Only append if it extends our chain and passes full validation
         expected_index = len(self.blockchain.chain)
         if block.header.index != expected_index:
-            print(
-                f"[{self._tag()}] rx block #{block.header.index} from {peer} "
-                f"— index mismatch (expected {expected_index}), ignoring"
-            )
+            if block.header.index > expected_index:
+                # We're behind — the sender's chain has blocks we've never
+                # seen (a dropped broadcast, or we just joined). There's no
+                # way to splice in a single block without the ones between,
+                # so ask for the whole chain instead of discarding this one.
+                print(
+                    f"[{self._tag()}] rx block #{block.header.index} from {peer} "
+                    f"— behind (expected {expected_index}), requesting their chain"
+                )
+                self.ez_send(peer, ChainRequestPayload.create())
+            else:
+                # We're ahead — the sender is behind us, nothing to do here;
+                # they'll catch up next time they discover a peer or receive
+                # a block themselves.
+                print(
+                    f"[{self._tag()}] rx block #{block.header.index} from {peer} "
+                    f"— stale (expected {expected_index}), ignoring"
+                )
             return
 
         # Temporarily append and validate the whole chain
@@ -305,6 +390,84 @@ class TicketChainCommunity(Community, PeerObserver):
                 f"[{self._tag()}] rx block #{block.header.index} from {peer} "
                 f"— chain validation failed, discarded"
             )
+
+    # ------------------------------------------------------------------
+    # Chain sync (longest-valid-chain rule)
+    # ------------------------------------------------------------------
+
+    async def _periodic_chain_sync(self) -> None:
+        """Ask every currently known peer for their chain, on a timer.
+
+        on_peer_added and the "block ahead of us" branch of _on_block both
+        already trigger a chain request — but both are event-driven, and we
+        observed a real case where the event never fires at all: a peer
+        that reconnects with an identity IPv8 has already seen once (e.g.
+        the same node restarting) isn't necessarily treated as newly
+        discovered, so on_peer_added never runs for it again, and if that
+        peer never happens to broadcast us a block directly either, nothing
+        ever prompts a resync — even though our own outbound requests to it
+        keep silently going unanswered. The issue this all exists for is
+        exactly "a node that misses one message can never catch up"; a
+        peer whose *discovery* event is the one that got missed is still
+        such a node. This timer is the backstop: sync eventually happens
+        for every peer regardless of why the event-driven path didn't fire.
+        """
+        for peer in self.get_peers():
+            self.ez_send(peer, ChainRequestPayload.create())
+
+    @lazy_wrapper(ChainRequestPayload)
+    def _on_chain_request(self, peer: Peer, payload: ChainRequestPayload) -> None:
+        if not payload.puzzle_ok():
+            print(f"[{self._tag()}] rx chain request from {peer} → dropped (invalid search puzzle)")
+            return
+        print(
+            f"[{self._tag()}] rx chain request from {peer} → replying "
+            f"(len {len(self.blockchain.chain)})"
+        )
+        self.ez_send(peer, ChainResponsePayload.from_chain(self.blockchain))
+
+    @lazy_wrapper(ChainResponsePayload)
+    def _on_chain_response(self, peer: Peer, payload: ChainResponsePayload) -> None:
+        if not payload.puzzle_ok():
+            print(f"[{self._tag()}] rx chain response from {peer} → dropped (invalid search puzzle)")
+            return
+
+        try:
+            candidate = payload.to_chain()
+        except (KeyError, ValueError, TypeError):
+            print(f"[{self._tag()}] rx chain response from {peer} → malformed, discarded")
+            return
+
+        if self._maybe_adopt_chain(candidate):
+            print(
+                f"[{self._tag()}] rx chain response from {peer} → adopted "
+                f"(len {len(candidate.chain)}, tip {candidate.latest_block.block_hash()[:12]}…)"
+            )
+        else:
+            print(
+                f"[{self._tag()}] rx chain response from {peer} → kept our own "
+                f"(theirs: len {len(candidate.chain)})"
+            )
+
+    def _maybe_adopt_chain(self, candidate: Blockchain) -> bool:
+        """Replace our chain with *candidate* per the longest-valid-chain
+        rule (Blockchain.should_replace_with). Returns True iff adopted.
+        """
+        if not self.blockchain.should_replace_with(candidate):
+            return False
+
+        # Mutate the existing Blockchain object in place — api.py's
+        # create_app(community.blockchain) captured this exact object at
+        # startup, so reassigning self.blockchain to a new instance would
+        # leave the HTTP API reading a stale chain forever.
+        included = {
+            tx.tx_hash() for block in candidate.chain for tx in block.transactions
+        }
+        self.blockchain.chain = candidate.chain
+        self.blockchain.mempool = [
+            tx for tx in self.blockchain.mempool if tx.tx_hash() not in included
+        ]
+        return True
 
     # ------------------------------------------------------------------
     # Util
@@ -333,17 +496,25 @@ def build_config(port: int) -> dict:
     return builder.finalize()
 
 
-async def start_api_server(community: TicketChainCommunity) -> asyncio.Task:
+async def start_api_server(community: TicketChainCommunity, api_port: int = API_PORT) -> asyncio.Task:
     """Start the FastAPI/uvicorn HTTP server as a background asyncio task.
 
-    Serves GET /tickets on http://127.0.0.1:8080 for the React frontend,
-    reading live from the community's Blockchain instance.
+    Serves GET /tickets on http://127.0.0.1:<api_port> for the React
+    frontend, reading live from the community's Blockchain instance.
+
+    Takes *api_port* as an explicit parameter rather than always reading the
+    module-level API_PORT: a second node on the same machine (see
+    test_two_nodes.py, start_demo.sh) needs its own port, and a bind failure
+    here is not a survivable error — uvicorn calls sys.exit() on one, and
+    SystemExit raised inside *any* asyncio task, even a fire-and-forget one
+    like this server task, propagates through the event loop and kills the
+    whole process.
     """
     app = create_app(community.blockchain)
-    config = uvicorn.Config(app, host=API_HOST, port=API_PORT, log_level="warning")
+    config = uvicorn.Config(app, host=API_HOST, port=api_port, log_level="warning")
     server = uvicorn.Server(config)
     task = asyncio.create_task(server.serve())
-    print(f"HTTP API listening on http://{API_HOST}:{API_PORT} (GET /tickets)")
+    print(f"HTTP API listening on http://{API_HOST}:{api_port} (GET /tickets)")
     return task
 
 
@@ -359,7 +530,9 @@ def start_bridge(community: TicketChainCommunity) -> asyncio.Task:
     return task
 
 
-async def start_node(port: int = DEFAULT_PORT, event: str = DEFAULT_EVENT) -> IPv8:
+async def start_node(
+    port: int = DEFAULT_PORT, event: str = DEFAULT_EVENT, api_port: int = API_PORT
+) -> IPv8:
     # Localized Peer Community Broadcasting: partition the overlay by event.
     TicketChainCommunity.community_id = event_community_id(event)
 
@@ -374,7 +547,7 @@ async def start_node(port: int = DEFAULT_PORT, event: str = DEFAULT_EVENT) -> IP
     community = next(
         o for o in ipv8.overlays if isinstance(o, TicketChainCommunity)
     )
-    await start_api_server(community)
+    await start_api_server(community, api_port)
     start_bridge(community)
     return ipv8
 
@@ -391,13 +564,29 @@ def parse_args() -> argparse.Namespace:
              f"(default {DEFAULT_EVENT!r}). Nodes only exchange messages "
              "with peers using the same event name.",
     )
+    parser.add_argument(
+        "--api-port", type=int, default=API_PORT,
+        help=f"Port for the GET /tickets HTTP API (default {API_PORT}). "
+             "Running a second node on the same machine (see start_demo.sh) "
+             "needs a different value here, or its API server fails to bind "
+             "the first node's port.",
+    )
     return parser.parse_args()
 
 
 async def main() -> None:
     args = parse_args()
-    await start_node(args.port, args.event)
-    await run_forever()
+    ipv8 = await start_node(args.port, args.event, args.api_port)
+    try:
+        await run_forever()
+    finally:
+        # run_forever() returns on SIGINT/SIGTERM but never tore anything
+        # down itself; without this, Ctrl+C (or a plain `kill`) leaves the
+        # UDP transport closed abruptly by the OS instead of by IPv8 — which
+        # otherwise leaves this node looking, to any peer that still has it
+        # in its table, like it's still there but has gone silent, rather
+        # than like it cleanly left.
+        await ipv8.stop()
 
 
 if __name__ == "__main__":
