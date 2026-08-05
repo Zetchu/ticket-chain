@@ -31,6 +31,11 @@ contract TicketNFT is ERC721, Ownable {
         ///      against `imageBaseURI`. Empty when no image was uploaded, in
         ///      which case tokenURI falls back to art generated on-chain.
         string imageRef;
+        /// @dev Per-event cap on primary-sale purchases by any one address.
+        ///      0 means unlimited. Enforced in resaleTransfer when the seller
+        ///      is the organizer (owner()). Set at mint time; permanent for
+        ///      the batch, matching the invariant used for faceValue.
+        uint256 maxPerBuyer;
     }
 
     /// @notice An owner's standing offer to sell a ticket at `price`.
@@ -84,7 +89,7 @@ contract TicketNFT is ERC721, Ownable {
         // Event 0 is the fallback for tickets issued with mintTicket(), which
         // carries no event of its own.
         _nextEventId = 1;
-        eventDetails[0] = EventDetails({name: "General Admission", date: 0, imageRef: ""});
+        eventDetails[0] = EventDetails({name: "General Admission", date: 0, imageRef: "", maxPerBuyer: 0});
         emit EventCreated(0, "General Admission", 0);
     }
 
@@ -121,7 +126,8 @@ contract TicketNFT is ERC721, Ownable {
         string calldata name,
         uint256 date,
         string calldata imageRef,
-        uint256 faceValue
+        uint256 faceValue,
+        uint256 maxPerBuyer
     ) external onlyOwner returns (uint256 eventId) {
         require(quantity > 0, "Quantity must be at least 1");
         require(bytes(name).length > 0, "Event name is required");
@@ -129,7 +135,12 @@ contract TicketNFT is ERC721, Ownable {
         require(faceValue > 0, "Face value is required");
 
         eventId = _nextEventId++;
-        eventDetails[eventId] = EventDetails({name: name, date: date, imageRef: imageRef});
+        eventDetails[eventId] = EventDetails({
+            name: name,
+            date: date,
+            imageRef: imageRef,
+            maxPerBuyer: maxPerBuyer
+        });
         emit EventCreated(eventId, name, date);
 
         for (uint256 i = 0; i < quantity; i++) {
@@ -149,12 +160,18 @@ contract TicketNFT is ERC721, Ownable {
     function getTicketEvent(uint256 tokenId)
         external
         view
-        returns (string memory name, uint256 date, string memory image, uint256 faceValue)
+        returns (
+            string memory name,
+            uint256 date,
+            string memory image,
+            uint256 faceValue,
+            uint256 maxPerBuyer
+        )
     {
         _requireOwned(tokenId);
         Ticket storage ticket = tickets[tokenId];
         EventDetails storage details = eventDetails[ticket.eventId];
-        return (details.name, details.date, _imageURL(details), ticket.faceValue);
+        return (details.name, details.date, _imageURL(details), ticket.faceValue, details.maxPerBuyer);
     }
 
     /// @notice ERC-721 metadata for `tokenId`, as a self-contained data URI.
