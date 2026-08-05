@@ -3,11 +3,14 @@ import { Box, Button, Card, CardContent, Tooltip, Typography } from '@mui/materi
 import LocationOnOutlinedIcon from '@mui/icons-material/LocationOnOutlined';
 import CalendarTodayOutlinedIcon from '@mui/icons-material/CalendarTodayOutlined';
 import { useState } from 'react';
+import { useConnection } from 'wagmi';
+import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import { formatEther } from 'viem';
 import { ticketAbi, ticketAddress } from '../contracts/ticketNFT';
 import type { BoardTicket } from '../hooks/useTicketBoard';
 import { useTicketWrite } from '../hooks/useTicketWrite';
 import { truncateAddress } from '../lib/format';
+import { watchTicket, WatchAssetUnsupported } from '../lib/watchAsset';
 import {
   ctaButtonSx,
   FONT_DISPLAY,
@@ -36,6 +39,8 @@ export default function TicketCard({
   // faceValue is per ticket — each event's batch sets its own resale ceiling.
   const { ticket, owner, listing, isOwnedByViewer, imageUrl, faceValue } = entry;
   const [isListingFormRequested, setListingFormRequested] = useState(false);
+  const [walletNotice, setWalletNotice] = useState<string | null>(null);
+  const { connector } = useConnection();
 
   const write = useTicketWrite(onChainRefresh);
 
@@ -79,6 +84,24 @@ export default function TicketCard({
     : write.isConfirming
       ? 'Processing…'
       : null;
+
+  // MetaMask cannot discover NFTs on a local chain, so a freshly minted ticket
+  // stays invisible in the wallet until it is registered by hand. Offer to do
+  // it in one prompt instead.
+  const addToWallet = async () => {
+    if (!connector) return;
+    setWalletNotice(null);
+    try {
+      const added = await watchTicket(connector, ticket.id);
+      setWalletNotice(added ? 'Added to your wallet.' : 'Not added.');
+    } catch (error) {
+      setWalletNotice(
+        error instanceof WatchAssetUnsupported
+          ? error.message
+          : 'Could not add the ticket to your wallet.',
+      );
+    }
+  };
 
   const priceLabel = isChainStateLoaded
     ? `${formatEther(isListed ? listing.price : faceValue)} ETH`
@@ -186,6 +209,25 @@ export default function TicketCard({
 
         {/* Actions sit at the bottom edge however tall the card grows. */}
         <Box sx={{ mt: 'auto', pt: 2 }}>
+          {isOwnedByViewer && (
+            <Box sx={{ mb: 1 }}>
+              <Button
+                fullWidth
+                startIcon={<AccountBalanceWalletOutlinedIcon sx={{ fontSize: 16 }} />}
+                onClick={addToWallet}
+                sx={{ ...ghostButtonSx, justifyContent: 'center' }}
+              >
+                Show in wallet
+              </Button>
+              {walletNotice && (
+                <Typography
+                  sx={{ ...monoLabelSx, color: tokens.outline, mt: 0.5, display: 'block' }}
+                >
+                  {walletNotice}
+                </Typography>
+              )}
+            </Box>
+          )}
           {isOwnedByViewer ? (
             isListingFormOpen && faceValue !== undefined ? (
               <ListingForm
