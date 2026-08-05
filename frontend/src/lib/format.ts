@@ -12,6 +12,11 @@ export function isSameAddress(a?: string, b?: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
+const REVERT_MESSAGES: Record<string, string> = {
+  'Primary purchase limit reached for this event':
+    "You've hit this event's per-wallet purchase limit.",
+};
+
 /**
  * The most useful sentence out of a wallet/contract error.
  *
@@ -22,7 +27,12 @@ export function isSameAddress(a?: string, b?: string): boolean {
 export function readableError(error: unknown): string {
   if (error && typeof error === 'object' && 'shortMessage' in error) {
     const short = (error as { shortMessage?: unknown }).shortMessage;
-    if (typeof short === 'string' && short.length > 0) return short;
+    if (typeof short === 'string' && short.length > 0) {
+      for (const [needle, replacement] of Object.entries(REVERT_MESSAGES)) {
+        if (short.includes(needle)) return replacement;
+      }
+      return short;
+    }
   }
   if (error instanceof Error) return error.message.split('\n')[0];
   return 'Something went wrong';
