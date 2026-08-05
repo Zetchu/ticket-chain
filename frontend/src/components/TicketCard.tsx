@@ -7,7 +7,7 @@ import { formatEther } from 'viem';
 import { ticketAbi, ticketAddress } from '../contracts/ticketNFT';
 import type { BoardTicket } from '../hooks/useTicketBoard';
 import { useTicketWrite } from '../hooks/useTicketWrite';
-import { truncateAddress } from '../lib/format';
+import { isSameAddress, truncateAddress } from '../lib/format';
 import {
   ctaButtonSx,
   FONT_DISPLAY,
@@ -27,14 +27,30 @@ export default function TicketCard({
   entry,
   isConnected,
   onChainRefresh,
+  contractOwner,
 }: {
   entry: BoardTicket;
   isConnected: boolean;
   /** Re-read on-chain state after a write confirms. */
   onChainRefresh: () => void;
+  /** Contract owner address — used to detect a primary-sale listing. */
+  contractOwner?: string;
 }) {
   // faceValue is per ticket — each event's batch sets its own resale ceiling.
   const { ticket, owner, listing, isOwnedByViewer, imageUrl, faceValue } = entry;
+
+  const maxPerBuyer = entry.maxPerBuyer;
+  const primaryBought = entry.primaryBought;
+
+  // Primary sale = the current ticket holder (owner) is the contract owner (organizer).
+  const isPrimarySale = isSameAddress(owner, contractOwner);
+
+  const hasCap = maxPerBuyer !== undefined && maxPerBuyer > 0n;
+  const capReached =
+    hasCap &&
+    isPrimarySale &&
+    primaryBought !== undefined &&
+    primaryBought >= (maxPerBuyer as bigint);
   const [isListingFormRequested, setListingFormRequested] = useState(false);
 
   const write = useTicketWrite(onChainRefresh);
@@ -112,6 +128,14 @@ export default function TicketCard({
         {isOwnedByViewer && (
           <Box sx={{ position: 'absolute', top: 12, left: 12 }}>
             <StatusChip tone='violet' label='Yours' />
+          </Box>
+        )}
+        {hasCap && (
+          <Box sx={{ position: 'absolute', bottom: 12, right: 12 }}>
+            <StatusChip
+              tone='orange'
+              label={`Limit ${maxPerBuyer!.toString()} / wallet`}
+            />
           </Box>
         )}
       </Box>
@@ -226,7 +250,7 @@ export default function TicketCard({
               fullWidth
               variant='contained'
               onClick={buy}
-              disabled={!isConnected || !isListed || write.isBusy}
+              disabled={!isConnected || !isListed || write.isBusy || capReached}
               sx={ctaButtonSx(write.isConfirmed && write.action === 'buy', write.isBusy)}
             >
               {busyLabel ??
@@ -236,9 +260,11 @@ export default function TicketCard({
                     ? 'Loading…'
                     : !isListed
                       ? 'Not for sale'
-                      : isConnected
-                        ? 'Buy Ticket'
-                        : 'Connect to buy')}
+                      : capReached
+                        ? 'Limit reached'
+                        : isConnected
+                          ? 'Buy Ticket'
+                          : 'Connect to buy')}
             </Button>
           )}
         </Box>

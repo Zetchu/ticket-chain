@@ -11,10 +11,13 @@ export default function TicketGrid({
   entries,
   isConnected,
   onChainRefresh,
+  contractOwner,
 }: {
   entries: BoardTicket[];
   isConnected: boolean;
   onChainRefresh: () => void;
+  /** Contract owner address — threaded into each card for primary-sale detection. */
+  contractOwner?: string;
 }) {
   return (
     <Grid container spacing={2.5}>
@@ -24,6 +27,7 @@ export default function TicketGrid({
             entry={entry}
             isConnected={isConnected}
             onChainRefresh={onChainRefresh}
+            contractOwner={contractOwner}
           />
         </Grid>
       ))}
