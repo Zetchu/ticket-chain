@@ -65,7 +65,15 @@ class Transaction:
         price:       Offered sale price (arbitrary integer units).
         face_value:  Original face value of the ticket (anti-scalping ceiling).
         timestamp:   Unix timestamp of creation (float seconds).
+        kind:        Optional lifecycle state of the ticket this transaction
+                     represents ("Minted", "Listed", "Sold", "Unlisted").
+        event_name:  Optional on-chain event name the ticket admits to.
+        event_date:  Optional event start (Unix timestamp, seconds).
         signature:   DER-encoded ECDSA signature bytes, or None if unsigned.
+
+    The optional fields are covered by the signature when present, but are
+    omitted from the signable payload when None — transactions created
+    before these fields existed keep the exact same bytes and still verify.
     """
 
     sender: str
@@ -74,6 +82,9 @@ class Transaction:
     price: int
     face_value: int
     timestamp: float = field(default_factory=time.time)
+    kind: Optional[str] = None
+    event_name: Optional[str] = None
+    event_date: Optional[int] = None
     signature: Optional[bytes] = field(default=None, repr=False)
 
     # ------------------------------------------------------------------
@@ -93,6 +104,15 @@ class Transaction:
             "face_value": self.face_value,
             "timestamp": self.timestamp,
         }
+        # Only include the newer optional fields when set: a transaction
+        # created without them signs (and verifies) the exact same bytes as
+        # before the fields existed.
+        if self.kind is not None:
+            payload["kind"] = self.kind
+        if self.event_name is not None:
+            payload["event_name"] = self.event_name
+        if self.event_date is not None:
+            payload["event_date"] = self.event_date
         return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
 
     def tx_hash(self) -> str:
@@ -100,7 +120,7 @@ class Transaction:
         return hashlib.sha256(self._signable_bytes()).hexdigest()
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "sender": self.sender,
             "recipient": self.recipient,
             "ticket_id": self.ticket_id,
@@ -109,6 +129,13 @@ class Transaction:
             "timestamp": self.timestamp,
             "signature": self.signature.hex() if self.signature else None,
         }
+        if self.kind is not None:
+            data["kind"] = self.kind
+        if self.event_name is not None:
+            data["event_name"] = self.event_name
+        if self.event_date is not None:
+            data["event_date"] = self.event_date
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "Transaction":
@@ -120,6 +147,9 @@ class Transaction:
             price=data["price"],
             face_value=data["face_value"],
             timestamp=data["timestamp"],
+            kind=data.get("kind"),
+            event_name=data.get("event_name"),
+            event_date=data.get("event_date"),
             signature=sig,
         )
 

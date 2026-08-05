@@ -133,6 +133,48 @@ class TestTransaction:
         assert restored.tx_hash() == signed_tx.tx_hash()
         assert restored.verify() is True
 
+    def test_roundtrip_with_event_metadata(self, keypair_alice, keypair_bob):
+        """Sign/verify must survive serialization when the optional lifecycle
+        and event fields are set — they are part of the signed payload."""
+        priv_alice, pub_alice = keypair_alice
+        _, pub_bob = keypair_bob
+        tx = Transaction(
+            sender=pub_alice, recipient=pub_bob,
+            ticket_id="3", price=50, face_value=100,
+            kind="Listed", event_name="Sunset Festival", event_date=1893456000,
+        )
+        tx.sign(priv_alice)
+
+        restored = Transaction.from_dict(tx.to_dict())
+        assert restored.kind == "Listed"
+        assert restored.event_name == "Sunset Festival"
+        assert restored.event_date == 1893456000
+        assert restored.tx_hash() == tx.tx_hash()
+        assert restored.verify() is True
+
+    def test_transactions_without_new_fields_still_validate(self, signed_tx):
+        """A transaction created before kind/event_name/event_date existed
+        must sign the exact same bytes as today's default construction: its
+        serialized form has no new keys and it still verifies."""
+        data = signed_tx.to_dict()
+        assert "kind" not in data
+        assert "event_name" not in data
+        assert "event_date" not in data
+        assert Transaction.from_dict(data).verify() is True
+
+    def test_tampered_event_name_fails_verify(self, keypair_alice, keypair_bob):
+        """The event metadata is covered by the signature when present."""
+        priv_alice, pub_alice = keypair_alice
+        _, pub_bob = keypair_bob
+        tx = Transaction(
+            sender=pub_alice, recipient=pub_bob,
+            ticket_id="3", price=50, face_value=100,
+            kind="Listed", event_name="Sunset Festival", event_date=1893456000,
+        )
+        tx.sign(priv_alice)
+        tx.event_name = "Scam Fest"
+        assert tx.verify() is False
+
 
 # ---------------------------------------------------------------------------
 # Merkle tree tests
@@ -438,13 +480,14 @@ class TestSearchPuzzle:
 class TestAPI:
 
     @staticmethod
-    def _offering(token_id: str) -> Transaction:
+    def _offering(token_id: str, **fields) -> Transaction:
         """A signed ticket offering for on-chain token *token_id*."""
         priv, pub = generate_keypair()
         _, pub2 = generate_keypair()
         tx = Transaction(
             sender=pub, recipient=pub2,
             ticket_id=token_id, price=10, face_value=20,
+            **fields,
         )
         tx.sign(priv)
         return tx
@@ -496,6 +539,56 @@ class TestAPI:
         """`id` is the ERC-721 token ID the frontend calls the contract with."""
         tickets = client.get("/tickets").json()
         assert [t["id"] for t in tickets] == [0, 7]
+
+    def test_one_row_per_token(self, blockchain):
+        """A ticket minted, listed, and sold is ONE feed entry — the latest
+        transaction for the token — not three."""
+        from fastapi.testclient import TestClient
+        from api import create_app
+
+        blockchain.add_transaction(self._offering("3", kind="Minted"))
+        blockchain.add_transaction(self._offering("3", kind="Listed"))
+        blockchain.mine_pending()
+        blockchain.add_transaction(self._offering("3", kind="Sold"))
+        blockchain.mine_pending()
+
+        tickets = TestClient(create_app(blockchain)).get("/tickets").json()
+        assert len(tickets) == 1
+        assert tickets[0]["id"] == 3
+        assert tickets[0]["type"] == "Sold"
+
+    def test_pending_wins_over_mined(self, blockchain):
+        """A not-yet-mined sale must override the token's mined history and
+        show as Pending."""
+        from fastapi.testclient import TestClient
+        from api import create_app
+
+        blockchain.add_transaction(self._offering("5", kind="Listed"))
+        blockchain.mine_pending()
+        blockchain.add_transaction(self._offering("5", kind="Sold"))
+
+        tickets = TestClient(create_app(blockchain)).get("/tickets").json()
+        assert len(tickets) == 1
+        assert tickets[0]["type"] == "Pending"
+
+    def test_event_metadata_used_for_title_and_date(self, blockchain):
+        """Bridged event_name/event_date become the feed's title and date;
+        transactions without them keep the placeholder title."""
+        from fastapi.testclient import TestClient
+        from api import create_app
+
+        blockchain.add_transaction(self._offering(
+            "0", kind="Listed",
+            event_name="Sunset Festival", event_date=1893456000,
+        ))
+        blockchain.add_transaction(self._offering("1"))
+        blockchain.mine_pending()
+
+        by_id = {t["id"]: t for t in
+                 TestClient(create_app(blockchain)).get("/tickets").json()}
+        assert by_id[0]["title"] == "Sunset Festival"
+        assert by_id[0]["date"] == "2030-01-01 00:00"
+        assert by_id[1]["title"] == "Ticket #1"
 
     def test_get_tickets_skips_transactions_without_a_token_id(self, blockchain):
         """A ticket_id that is not a token ID has no on-chain counterpart, so
