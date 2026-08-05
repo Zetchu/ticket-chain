@@ -34,6 +34,7 @@ export default function OrganizerPage() {
   const [image, setImage] = useState<{ file: File; preview: string; hash?: string } | null>(null);
   const [isUploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [maxPerBuyer, setMaxPerBuyer] = useState(0);
 
   const { all, owned, totalMinted, owner, isPending, refresh } = useTicketBoard();
 
@@ -108,7 +109,14 @@ export default function OrganizerPage() {
       address: ticketAddress,
       abi: ticketAbi,
       functionName: 'mintAndList',
-      args: [BigInt(quantity), eventName.trim(), BigInt(eventDateSeconds), imageRef, priceWei!],
+      args: [
+        BigInt(quantity),
+        eventName.trim(),
+        BigInt(eventDateSeconds),
+        imageRef,
+        priceWei!,
+        BigInt(maxPerBuyer),
+      ],
     });
   };
 
@@ -268,6 +276,21 @@ export default function OrganizerPage() {
                 },
                 htmlInput: { inputMode: 'decimal' },
               }}
+              sx={{ mb: 2.5 }}
+            />
+
+            <FieldLabel>Max per buyer</FieldLabel>
+            <TextField
+              fullWidth
+              type='number'
+              size='small'
+              value={maxPerBuyer}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!isNaN(v)) setMaxPerBuyer(Math.max(0, v));
+              }}
+              helperText='0 = unlimited. Otherwise, no single wallet can buy more than this from the primary sale.'
+              slotProps={{ htmlInput: { min: 0 } }}
               sx={{ mb: 2.5 }}
             />
 
