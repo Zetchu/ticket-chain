@@ -159,10 +159,14 @@ tuple as the sixth argument.
    `primaryBought < maxPerBuyer` at page-load time.
 2. If the buyer already succeeded on N-1 purchases in the same session,
    `useTicketBoard` refreshed after each; the button flips to `Limit reached`
-   after the N-th confirms and blocks further clicks preemptively.
-3. If a race slips through (two txs in flight simultaneously), the contract
-   reverts the second with `"Primary purchase limit reached for this event"`
-   and the snackbar renders the friendly message via `readableError`.
+   after the N-th confirms and blocks further clicks preemptively. During
+   the in-flight window between signing and confirmation the existing
+   `isBusy` state disables the button, so a double-click cannot fire a
+   second tx before the count updates.
+3. If a race slips through (two txs in flight simultaneously across
+   different cards/tabs), the contract reverts the second with
+   `"Primary purchase limit reached for this event"` and the snackbar
+   renders the friendly message via `readableError`.
 
 ## Testing
 
