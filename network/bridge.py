@@ -68,9 +68,10 @@ class ContractEventBridge:
         # The bridge's P2P identity: every republished event is signed with
         # this key so peers can validate the transaction signature.
         self._key, self._pubkey = generate_keypair()
-        # getTicketEvent(tokenId) results; a ticket's event never changes, so
-        # each token is asked once per chain (cleared when the chain resets).
-        self._event_cache: dict[int, tuple[str | None, int | None]] = {}
+        # getTicketEvent(tokenId) results; a ticket's event and face value
+        # never change, so each token is asked once per chain (cleared when
+        # the chain resets).
+        self._event_cache: dict[int, tuple[str | None, int | None, int | None]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -113,10 +114,6 @@ class ContractEventBridge:
             address=w3.to_checksum_address(info["address"]), abi=info["abi"]
         )
 
-        # All tickets are issued at the contract's fixed face value; cache it
-        # once as the anti-scalping ceiling for every republished transaction.
-        face_value = int(await contract.functions.FACE_VALUE().call())
-
         # Start from the current tip: history before the bridge came up is
         # replayed on the next deploy anyway (deploy.js mints fresh tokens).
         self._event_cache.clear()
@@ -149,7 +146,7 @@ class ContractEventBridge:
             logs.sort(key=lambda log: (log["blockNumber"], log["logIndex"]))
 
             for log in logs:
-                await self._publish(contract, log, face_value)
+                await self._publish(contract, log)
             if logs:
                 # One P2P block per batch of contract events: mine the mempool
                 # and broadcast it so peers pick the state change up.
@@ -161,7 +158,7 @@ class ContractEventBridge:
     # Event → Transaction
     # ------------------------------------------------------------------
 
-    async def _publish(self, contract, log, face_value: int) -> None:
+    async def _publish(self, contract, log) -> None:
         """Republish one contract event as a signed P2P transaction.
 
         ticket_id carries the ERC-721 token ID as a string — api.py parses
@@ -169,6 +166,11 @@ class ContractEventBridge:
         also carries the ticket's lifecycle state (kind) and the on-chain
         event name/date, so feed consumers see real metadata instead of
         placeholders.
+
+        face_value is read per ticket: each batch sets its own ceiling, and
+        Transaction.is_valid() enforces price <= face_value on every peer —
+        stamping a wrong (global) ceiling would make peers silently reject
+        transactions for any ticket priced above it.
         """
         name = log["event"]
         args = log["args"]
@@ -187,7 +189,12 @@ class ContractEventBridge:
             price = 0
             counterparty = args["seller"]
 
-        event_name, event_date = await self._ticket_event(contract, token_id)
+        event_name, event_date, face_value = await self._ticket_event(contract, token_id)
+        if face_value is None:
+            # Without the real ceiling the transaction cannot be validated
+            # honestly; the event's price is the best safe stand-in (a mint
+            # or listing price never exceeds the ticket's face value).
+            face_value = price
 
         tx = Transaction(
             sender=self._pubkey,
@@ -205,20 +212,23 @@ class ContractEventBridge:
 
     async def _ticket_event(
         self, contract, token_id: int
-    ) -> tuple[str | None, int | None]:
-        """The on-chain event (name, date) a ticket admits to, cached per token.
+    ) -> tuple[str | None, int | None, int | None]:
+        """The ticket's on-chain (event name, event date, face value), cached
+        per token — all three are immutable once minted.
 
-        Falls back to (None, None) — placeholder metadata in the feed — rather
-        than failing the whole event batch if the read reverts.
+        Falls back to (None, None, None) — placeholder metadata and a
+        price-derived ceiling — rather than failing the whole event batch if
+        the read reverts.
         """
         if token_id not in self._event_cache:
             try:
-                # Returns (name, date, imageRef) since the artwork feature;
-                # index instead of unpacking so older 2-tuple ABIs work too.
+                # Returns (name, date, imageRef, faceValue); index instead of
+                # unpacking so older, shorter ABI shapes still work.
                 result = await contract.functions.getTicketEvent(token_id).call()
                 name, date = result[0], result[1]
-                self._event_cache[token_id] = (name or None, int(date) or None)
+                face_value = int(result[3]) if len(result) > 3 else None
+                self._event_cache[token_id] = (name or None, int(date) or None, face_value)
             except Exception as exc:  # noqa: BLE001 - metadata is best-effort
                 print(f"[bridge] getTicketEvent({token_id}) failed: {exc}")
-                self._event_cache[token_id] = (None, None)
+                self._event_cache[token_id] = (None, None, None)
         return self._event_cache[token_id]

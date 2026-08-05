@@ -161,11 +161,14 @@ cd frontend  && npm run dev                               # UI only
 ## 5. Example usage
 
 **As an organizer.** Connect account #0 (the deployer) — the Organizer page
-appears. Enter an event name, date and quantity, optionally choose a poster
-image, then Mint & List. The image is uploaded to the P2P node first and
-addressed by content hash; one transaction then creates the event, mints the
-batch, and lists every ticket at the 0.05 ETH face value. The cards appear on Buy Tickets immediately, and the bridge
-publishes the events to the P2P ledger within a couple of seconds.
+appears. Enter an event name, date, quantity and a face value in ETH,
+optionally choose a poster image, then Mint & List. The image is uploaded to
+the P2P node first and addressed by content hash; one transaction then creates
+the event, mints the batch, and lists every ticket at the face value you chose.
+That value is permanent — it is the resale ceiling for those tickets forever —
+while every new event can be priced freely. The cards appear on Buy Tickets
+immediately, and the bridge publishes the events to the P2P ledger within a
+couple of seconds.
 
 **As an attendee.** Switch to another account, open Buy Tickets, click Buy, and
 confirm. `resaleTransfer` checks the listing, moves the token, and forwards the
@@ -290,8 +293,11 @@ We would rather state these than have them found.
   without an upload carry their SVG inline and render anywhere.
 - **Nothing persists across restarts.** Both chains are in-memory or in
   Hardhat's ephemeral state; `./start_dev.sh` starts from an empty ledger.
-- **One event's tickets share one hard-coded face value** (`FACE_VALUE`,
-  0.05 ETH), fixed at deploy time.
+- **One event's tickets share one face value**, chosen by the organizer at
+  mint time. It is permanent by design: the batch's resale ceiling can never
+  be raised or lowered afterwards, though each new event sets its own price.
+  (`mintTicket`, the eventless escape hatch, still uses the 0.05 ETH
+  `DEFAULT_FACE_VALUE`.)
 - **The P2P chain has no fork-choice beyond longest-valid-chain**, and no
   incentive layer — mining is done by whichever node bridged the event.
 - **Localized discovery is a design choice with a cost:** two nodes on different

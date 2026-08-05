@@ -26,17 +26,15 @@ import TransactionSnackbar from './TransactionSnackbar';
 export default function TicketCard({
   entry,
   isConnected,
-  faceValue,
   onChainRefresh,
 }: {
   entry: BoardTicket;
   isConnected: boolean;
-  /** The contract's face value — the ceiling every listing is capped at. */
-  faceValue?: bigint;
   /** Re-read on-chain state after a write confirms. */
   onChainRefresh: () => void;
 }) {
-  const { ticket, owner, listing, isOwnedByViewer, imageUrl } = entry;
+  // faceValue is per ticket — each event's batch sets its own resale ceiling.
+  const { ticket, owner, listing, isOwnedByViewer, imageUrl, faceValue } = entry;
   const [isListingFormRequested, setListingFormRequested] = useState(false);
 
   const write = useTicketWrite(onChainRefresh);

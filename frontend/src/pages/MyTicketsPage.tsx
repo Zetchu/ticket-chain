@@ -9,7 +9,7 @@ import { useTicketBoard } from '../hooks/useTicketBoard';
 
 export default function MyTicketsPage() {
   const { isConnected } = useConnection();
-  const { owned, faceValue, isPending, isError, error, refresh } = useTicketBoard();
+  const { owned, isPending, isError, error, refresh } = useTicketBoard();
 
   return (
     <Box component='section'>
@@ -29,7 +29,6 @@ export default function MyTicketsPage() {
         <TicketGrid
           entries={owned}
           isConnected={isConnected}
-          faceValue={faceValue}
           onChainRefresh={refresh}
         />
       ) : (

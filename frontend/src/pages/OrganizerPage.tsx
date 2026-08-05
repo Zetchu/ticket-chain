@@ -8,7 +8,7 @@ import SellOutlinedIcon from '@mui/icons-material/SellOutlined';
 import RocketLaunchOutlinedIcon from '@mui/icons-material/RocketLaunchOutlined';
 import type { ReactNode } from 'react';
 import { useConnection } from 'wagmi';
-import { formatEther } from 'viem';
+import { parseEther } from 'viem';
 import PageHeader from '../components/PageHeader';
 import TransactionSnackbar from '../components/TransactionSnackbar';
 import { useTicketBoard } from '../hooks/useTicketBoard';
@@ -28,13 +28,14 @@ export default function OrganizerPage() {
   const navigate = useNavigate();
   const { address, isConnected } = useConnection();
   const [quantity, setQuantity] = useState(1);
+  const [priceEth, setPriceEth] = useState('0.05');
   const [eventName, setEventName] = useState('');
   const [eventDate, setEventDate] = useState('');
   const [image, setImage] = useState<{ file: File; preview: string; hash?: string } | null>(null);
   const [isUploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const { all, owned, faceValue, totalMinted, owner, isPending, refresh } = useTicketBoard();
+  const { all, owned, totalMinted, owner, isPending, refresh } = useTicketBoard();
 
   const { action, submit, isBusy, isConfirmed, error, hash, isFeedbackOpen, closeFeedback } =
     useTicketWrite(refresh);
@@ -62,10 +63,22 @@ export default function OrganizerPage() {
   // datetime-local gives a local wall-clock string; the contract stores Unix
   // seconds, so it is converted once here at the boundary.
   const eventDateSeconds = eventDate ? Math.floor(new Date(eventDate).getTime() / 1000) : 0;
+
+  // Face value the batch is minted at, in wei. undefined = not a valid price.
+  const priceWei = (() => {
+    try {
+      const wei = parseEther(priceEth as `${number}`);
+      return wei > 0n ? wei : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+
   const canMint =
     eventName.trim().length > 0 &&
     eventDateSeconds > 0 &&
     quantity > 0 &&
+    priceWei !== undefined &&
     !isBusy &&
     !isUploading;
 
@@ -95,7 +108,7 @@ export default function OrganizerPage() {
       address: ticketAddress,
       abi: ticketAbi,
       functionName: 'mintAndList',
-      args: [BigInt(quantity), eventName.trim(), BigInt(eventDateSeconds), imageRef],
+      args: [BigInt(quantity), eventName.trim(), BigInt(eventDateSeconds), imageRef, priceWei!],
     });
   };
 
@@ -106,7 +119,6 @@ export default function OrganizerPage() {
     setImage({ file, preview: URL.createObjectURL(file) });
   };
 
-  const faceValueLabel = faceValue !== undefined ? `${formatEther(faceValue)} ETH` : '0.05 ETH';
 
   return (
     <Box component='section'>
@@ -155,13 +167,15 @@ export default function OrganizerPage() {
 
             <DataRow label='Address' value={truncateAddress(ticketAddress)} title={ticketAddress} />
             <DataRow label='Organizer' value={truncateAddress(owner)} title={owner} />
-            <DataRow label='Face value' value={faceValueLabel} />
+            <DataRow label='Face value' value='Set per event' />
             <DataRow label='Standard' value='ERC-721 · anti-scalping' last />
 
             <Typography sx={{ fontSize: '0.9rem', color: 'text.secondary', mt: 3, lineHeight: 1.7 }}>
               Every ticket in a batch carries the event name and date you enter, is minted to your
-              wallet, and is listed at {faceValueLabel}. Buyers purchase from the Buy Tickets page —
-              payment goes directly to you, and no resale can ever exceed face value.
+              wallet, and is listed at the face value you set. Buyers purchase from the Buy Tickets
+              page — payment goes directly to you, and no resale can ever exceed that face value.
+              The face value is permanent: it caps every future resale of the batch and cannot be
+              lowered afterwards, though each new event can be priced freely.
             </Typography>
           </Box>
         </Grid>
@@ -231,6 +245,28 @@ export default function OrganizerPage() {
                   ),
                 },
                 htmlInput: { min: 1, max: 50 },
+              }}
+              sx={{ mb: 2.5 }}
+            />
+
+            <FieldLabel>Face value per ticket</FieldLabel>
+            <TextField
+              fullWidth
+              size='small'
+              required
+              value={priceEth}
+              onChange={(e) => setPriceEth(e.target.value)}
+              error={priceEth !== '' && priceWei === undefined}
+              helperText='Permanent — caps every future resale of this batch and cannot be lowered later.'
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <InputAdornment position='end'>
+                      <Box sx={{ ...monoLabelSx, color: tokens.outline }}>ETH</Box>
+                    </InputAdornment>
+                  ),
+                },
+                htmlInput: { inputMode: 'decimal' },
               }}
               sx={{ mb: 2.5 }}
             />

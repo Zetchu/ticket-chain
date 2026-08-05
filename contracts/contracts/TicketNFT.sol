@@ -41,8 +41,9 @@ contract TicketNFT is ERC721, Ownable {
         bool active;
     }
 
-    /// @notice Hard-coded face value every ticket is issued at.
-    uint256 public constant FACE_VALUE = 0.05 ether;
+    /// @notice Face value used by mintTicket(), which takes no price of its
+    ///         own. mintAndList() batches carry the organizer's chosen value.
+    uint256 public constant DEFAULT_FACE_VALUE = 0.05 ether;
 
     /// @notice Where uploaded artwork is served from — an event's `imageRef` is
     ///         appended to this to form the image URL in the token metadata.
@@ -92,20 +93,25 @@ contract TicketNFT is ERC721, Ownable {
         imageBaseURI = baseURI;
     }
 
-    /// @notice Issue a new resellable ticket to `to` at the hard-coded face value.
+    /// @notice Issue a new resellable ticket to `to` at the default face value.
     /// @dev Assigned to event 0 ("General Admission"); use mintAndList to issue
-    ///      tickets for a named event.
+    ///      tickets for a named event at a price of the organizer's choosing.
     function mintTicket(address to) external onlyOwner returns (uint256 tokenId) {
-        tokenId = _mintOne(to, 0);
+        tokenId = _mintOne(to, 0, DEFAULT_FACE_VALUE);
     }
 
     /// @notice Mint `quantity` tickets for a named event, to the organizer, and
-    ///         list each at face value so they are immediately purchasable.
-    /// @param quantity  How many tickets to issue.
-    /// @param name      Event name shown on every ticket in the batch.
-    /// @param date      Event start as a Unix timestamp (seconds).
-    /// @param imageRef  Content hash of the organizer's uploaded artwork, or an
-    ///                  empty string to use the artwork generated on-chain.
+    ///         list each at `faceValue` so they are immediately purchasable.
+    /// @param quantity   How many tickets to issue.
+    /// @param name       Event name shown on every ticket in the batch.
+    /// @param date       Event start as a Unix timestamp (seconds).
+    /// @param imageRef   Content hash of the organizer's uploaded artwork, or an
+    ///                   empty string to use the artwork generated on-chain.
+    /// @param faceValue  Price (wei) each ticket in the batch is issued and
+    ///                   listed at. Permanent: it is the anti-scalping ceiling
+    ///                   for every future resale of these tickets and cannot be
+    ///                   changed afterwards. A new batch (a new event) may use
+    ///                   any other value.
     /// @dev The primary sale flows through resaleTransfer — one payment code
     ///      path, price ceiling enforced on first sale just like any resale.
     ///      Each call creates one event, so two batches are two events even if
@@ -114,36 +120,41 @@ contract TicketNFT is ERC721, Ownable {
         uint256 quantity,
         string calldata name,
         uint256 date,
-        string calldata imageRef
+        string calldata imageRef,
+        uint256 faceValue
     ) external onlyOwner returns (uint256 eventId) {
         require(quantity > 0, "Quantity must be at least 1");
         require(bytes(name).length > 0, "Event name is required");
         require(date > 0, "Event date is required");
+        require(faceValue > 0, "Face value is required");
 
         eventId = _nextEventId++;
         eventDetails[eventId] = EventDetails({name: name, date: date, imageRef: imageRef});
         emit EventCreated(eventId, name, date);
 
         for (uint256 i = 0; i < quantity; i++) {
-            uint256 tokenId = _mintOne(msg.sender, eventId);
-            listings[tokenId] = Listing({price: FACE_VALUE, active: true});
-            emit TicketListed(tokenId, msg.sender, FACE_VALUE);
+            uint256 tokenId = _mintOne(msg.sender, eventId, faceValue);
+            listings[tokenId] = Listing({price: faceValue, active: true});
+            emit TicketListed(tokenId, msg.sender, faceValue);
         }
     }
 
-    /// @notice Name, date and artwork URL of the event a ticket admits to.
+    /// @notice Name, date, artwork URL and face value of the ticket's event.
     /// @dev One call per ticket for the frontend, instead of reading the token's
     ///      event ID and then looking the event up separately. `image` is the
     ///      resolved URL of the organizer's upload, or empty when the ticket
-    ///      uses the artwork generated on-chain by tokenURI.
+    ///      uses the artwork generated on-chain by tokenURI. `faceValue` is
+    ///      this ticket's own resale ceiling — per token, since every batch
+    ///      may be priced differently.
     function getTicketEvent(uint256 tokenId)
         external
         view
-        returns (string memory name, uint256 date, string memory image)
+        returns (string memory name, uint256 date, string memory image, uint256 faceValue)
     {
         _requireOwned(tokenId);
-        EventDetails storage details = eventDetails[tickets[tokenId].eventId];
-        return (details.name, details.date, _imageURL(details));
+        Ticket storage ticket = tickets[tokenId];
+        EventDetails storage details = eventDetails[ticket.eventId];
+        return (details.name, details.date, _imageURL(details), ticket.faceValue);
     }
 
     /// @notice ERC-721 metadata for `tokenId`, as a self-contained data URI.
@@ -178,7 +189,9 @@ contract TicketNFT is ERC721, Ownable {
             '{"display_type":"date","trait_type":"Event date","value":',
             Strings.toString(details.date),
             "},",
-            '{"trait_type":"Face value","value":"0.05 ETH"},',
+            '{"trait_type":"Face value","value":"',
+            _formatEther(ticket.faceValue),
+            '"},',
             '{"trait_type":"Token ID","value":',
             Strings.toString(tokenId),
             "}]}"
@@ -262,17 +275,42 @@ contract TicketNFT is ERC721, Ownable {
         }
     }
 
-    /// @dev Issue one ticket for `eventId` at face value. Shared by both mint
+    /// @dev Issue one ticket for `eventId` at `faceValue`. Shared by both mint
     ///      entry points so the ticket record is built in exactly one place.
-    function _mintOne(address to, uint256 eventId) private returns (uint256 tokenId) {
+    function _mintOne(address to, uint256 eventId, uint256 faceValue)
+        private
+        returns (uint256 tokenId)
+    {
         tokenId = _nextTokenId++;
         tickets[tokenId] = Ticket({
-            faceValue: FACE_VALUE,
+            faceValue: faceValue,
             isResellable: true,
             eventId: eventId
         });
         _safeMint(to, tokenId);
-        emit TicketMinted(to, tokenId, FACE_VALUE);
+        emit TicketMinted(to, tokenId, faceValue);
+    }
+
+    /// @dev Render a wei amount as an "N.NNN ETH" string for token metadata,
+    ///      trimming trailing zeros from the fractional part.
+    function _formatEther(uint256 weiAmount) private pure returns (string memory) {
+        uint256 whole = weiAmount / 1 ether;
+        uint256 fraction = weiAmount % 1 ether;
+        if (fraction == 0) return string.concat(Strings.toString(whole), " ETH");
+
+        // Left-pad the fraction to 18 digits, then drop trailing zeros.
+        bytes memory digits = bytes(Strings.toString(fraction));
+        bytes memory padded = new bytes(18);
+        uint256 pad = 18 - digits.length;
+        for (uint256 i = 0; i < 18; i++) {
+            padded[i] = i < pad ? bytes1("0") : digits[i - pad];
+        }
+        uint256 end = 18;
+        while (padded[end - 1] == "0") end--;
+        bytes memory trimmed = new bytes(end);
+        for (uint256 i = 0; i < end; i++) trimmed[i] = padded[i];
+
+        return string.concat(Strings.toString(whole), ".", string(trimmed), " ETH");
     }
 
     /// @notice Total number of tickets minted so far (equals the next token ID).

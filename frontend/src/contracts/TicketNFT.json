@@ -354,7 +354,7 @@
     },
     {
       "inputs": [],
-      "name": "FACE_VALUE",
+      "name": "DEFAULT_FACE_VALUE",
       "outputs": [
         {
           "internalType": "uint256",
@@ -506,6 +506,11 @@
           "internalType": "string",
           "name": "image",
           "type": "string"
+        },
+        {
+          "internalType": "uint256",
+          "name": "faceValue",
+          "type": "uint256"
         }
       ],
       "stateMutability": "view",
@@ -611,6 +616,11 @@
           "internalType": "string",
           "name": "imageRef",
           "type": "string"
+        },
+        {
+          "internalType": "uint256",
+          "name": "faceValue",
+          "type": "uint256"
         }
       ],
       "name": "mintAndList",
