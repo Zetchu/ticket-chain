@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Typography, TextField, Button, InputAdornment, Grid } from '@mui/material';
+import ImageOutlinedIcon from '@mui/icons-material/ImageOutlined';
 import ConfirmationNumberOutlinedIcon from '@mui/icons-material/ConfirmationNumberOutlined';
 import StorefrontOutlinedIcon from '@mui/icons-material/StorefrontOutlined';
 import SellOutlinedIcon from '@mui/icons-material/SellOutlined';
@@ -14,6 +15,7 @@ import { useTicketBoard } from '../hooks/useTicketBoard';
 import { useTicketWrite } from '../hooks/useTicketWrite';
 import { ticketAddress, ticketAbi } from '../contracts/ticketNFT';
 import { isSameAddress, truncateAddress } from '../lib/format';
+import { ACCEPTED_IMAGE_TYPES, uploadEventImage } from '../lib/uploadImage';
 import {
   ctaButtonSx,
   FONT_DISPLAY,
@@ -28,6 +30,9 @@ export default function OrganizerPage() {
   const [quantity, setQuantity] = useState(1);
   const [eventName, setEventName] = useState('');
   const [eventDate, setEventDate] = useState('');
+  const [image, setImage] = useState<{ file: File; preview: string; hash?: string } | null>(null);
+  const [isUploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const { all, owned, faceValue, totalMinted, owner, isPending, refresh } = useTicketBoard();
 
@@ -58,16 +63,47 @@ export default function OrganizerPage() {
   // seconds, so it is converted once here at the boundary.
   const eventDateSeconds = eventDate ? Math.floor(new Date(eventDate).getTime() / 1000) : 0;
   const canMint =
-    eventName.trim().length > 0 && eventDateSeconds > 0 && quantity > 0 && !isBusy;
+    eventName.trim().length > 0 &&
+    eventDateSeconds > 0 &&
+    quantity > 0 &&
+    !isBusy &&
+    !isUploading;
 
-  const handleMint = () => {
+  const handleMint = async () => {
     if (!canMint) return;
+
+    // The image is uploaded before minting so the transaction carries a hash
+    // that already resolves; a failed upload must not produce a ticket
+    // pointing at artwork the node never stored.
+    let imageRef = image?.hash ?? '';
+    if (image && !image.hash) {
+      setUploading(true);
+      setUploadError(null);
+      try {
+        const uploaded = await uploadEventImage(image.file);
+        imageRef = uploaded.hash;
+        setImage((current) => (current ? { ...current, hash: uploaded.hash } : current));
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : 'Upload failed.');
+        return;
+      } finally {
+        setUploading(false);
+      }
+    }
+
     submit('mint', {
       address: ticketAddress,
       abi: ticketAbi,
       functionName: 'mintAndList',
-      args: [BigInt(quantity), eventName.trim(), BigInt(eventDateSeconds)],
+      args: [BigInt(quantity), eventName.trim(), BigInt(eventDateSeconds), imageRef],
     });
+  };
+
+  const chooseImage = (file?: File) => {
+    setUploadError(null);
+    if (!file) return;
+    // A fresh file invalidates any hash from a previous upload.
+    setImage({ file, preview: URL.createObjectURL(file) });
   };
 
   const faceValueLabel = faceValue !== undefined ? `${formatEther(faceValue)} ETH` : '0.05 ETH';
@@ -196,8 +232,78 @@ export default function OrganizerPage() {
                 },
                 htmlInput: { min: 1, max: 50 },
               }}
-              sx={{ mb: 3.5 }}
+              sx={{ mb: 2.5 }}
             />
+
+            <FieldLabel>Event artwork (optional)</FieldLabel>
+            <Box
+              component='label'
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                p: 1.5,
+                mb: uploadError ? 1 : 3.5,
+                borderRadius: '4px',
+                border: '1px dashed',
+                borderColor: image ? tokens.violet : 'rgba(255, 255, 255, 0.18)',
+                bgcolor: 'rgba(0, 0, 0, 0.3)',
+                cursor: 'pointer',
+                transition: 'border-color 0.15s ease',
+                '&:hover': { borderColor: tokens.violet },
+              }}
+            >
+              <input
+                hidden
+                type='file'
+                accept={ACCEPTED_IMAGE_TYPES}
+                onChange={(e) => chooseImage(e.target.files?.[0])}
+              />
+
+              {image ? (
+                <Box
+                  component='img'
+                  src={image.preview}
+                  alt=''
+                  sx={{ width: 56, height: 56, objectFit: 'cover', borderRadius: '4px' }}
+                />
+              ) : (
+                <Box
+                  sx={{
+                    width: 56,
+                    height: 56,
+                    display: 'grid',
+                    placeItems: 'center',
+                    borderRadius: '4px',
+                    bgcolor: 'rgba(255, 255, 255, 0.04)',
+                    color: tokens.outline,
+                  }}
+                >
+                  <ImageOutlinedIcon fontSize='small' />
+                </Box>
+              )}
+
+              <Box sx={{ minWidth: 0 }}>
+                <Typography sx={{ fontSize: '0.85rem', color: 'text.primary' }}>
+                  {image ? image.file.name : 'Choose an image'}
+                </Typography>
+                <Typography sx={{ ...monoLabelSx, color: tokens.outline, mt: 0.5 }}>
+                  {isUploading
+                    ? 'Uploading to the P2P node…'
+                    : image
+                      ? `${(image.file.size / 1024).toFixed(0)} KB · stored on the node at mint`
+                      : 'PNG, JPEG, WebP or GIF — generated art is used without one'}
+                </Typography>
+              </Box>
+            </Box>
+
+            {uploadError && (
+              <Typography
+                sx={{ ...monoLabelSx, color: tokens.error, mb: 2.5, display: 'block' }}
+              >
+                {uploadError}
+              </Typography>
+            )}
 
             <Button
               type='submit'
@@ -205,9 +311,9 @@ export default function OrganizerPage() {
               variant='contained'
               disabled={!canMint}
               startIcon={<RocketLaunchOutlinedIcon />}
-              sx={{ ...ctaButtonSx(false, isBusy), py: 1.4, fontSize: '0.95rem' }}
+              sx={{ ...ctaButtonSx(false, isBusy || isUploading), py: 1.4, fontSize: '0.95rem' }}
             >
-              {isBusy ? 'Processing…' : 'Mint & List'}
+              {isUploading ? 'Uploading…' : isBusy ? 'Processing…' : 'Mint & List'}
             </Button>
           </Box>
         </Grid>

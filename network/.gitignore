@@ -2,3 +2,5 @@
 __pycache__/
 *.pem
 sqlite/
+# Organizer-uploaded event artwork, stored by content hash at runtime.
+images/

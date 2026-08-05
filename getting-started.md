@@ -104,6 +104,9 @@ ABI + address exported to .../frontend/src/contracts/TicketNFT.json
 
 **Ctrl+C stops everything.** Backend output goes to `hardhat.log` and
 `network.log` in the project root — check those first if something looks wrong.
+If a service is ever left behind (a terminal closed without Ctrl+C, say), run
+`./stop_dev.sh` — and starting the stack again always clears the old one first,
+so `./start_dev.sh` is safe to re-run at any time.
 
 Open <http://localhost:5173>. The ticket board starts empty — connect as account #0
 (the organizer) and use the **Organizer** page to mint your first tickets.
@@ -163,8 +166,10 @@ Back in the app, click **Connect Wallet** and approve the connection.
 ## 6. Mint tickets and buy one
 
 1. Connect as **Account #0**. The **Organizer** page appears in the nav.
-2. Go to **Organizer**, enter a quantity (e.g. 3), and click **Mint & List**.
-   Confirm in MetaMask. The tickets appear on the **Buy Tickets** page instantly.
+2. Go to **Organizer**, fill in an event name and date, set a quantity (e.g. 3),
+   and optionally pick a poster image. Click **Mint & List** and confirm in
+   MetaMask. The tickets appear on the **Buy Tickets** page instantly, showing
+   your image — or artwork generated from the token ID if you skipped it.
 3. Switch MetaMask to **Account #1**.
 4. On **Buy Tickets**, pick a card — listed at 0.05 ETH by account #0.
 5. Click **Buy Ticket** and confirm. The button walks through *Confirm in wallet* →
@@ -240,9 +245,11 @@ MetaMask → Settings → Advanced → **Clear activity tab data**.
 Click **Switch network** in the banner, or select *Hardhat Local* manually.
 
 **`Port 8545 is already in use`**
-A previous run is still alive. Kill it:
+A previous run is still alive — usually a terminal that was closed without
+Ctrl+C. `./start_dev.sh` clears this automatically before it starts, so just run
+it again. To stop everything without starting it back up:
 ```bash
-pkill -f "hardhat node"; pkill -f vite; pkill -f "main.py"
+./stop_dev.sh
 ```
 
 **Tickets vanished after a restart**

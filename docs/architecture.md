@@ -33,7 +33,7 @@ flowchart TB
         A <-- "UDP broadcast discovery<br/>Transaction / Block / ChainRequest<br/>/ ChainResponse payloads" --> B
         BC -- "shared instance per node" --> A
         BC -- "shared instance per node" --> B
-        API["HTTP API :8080<br/>FastAPI — GET /tickets, /health"]
+        API["HTTP API :8080<br/>FastAPI — /tickets, /health,<br/>/images (event artwork)"]
         A -- "reads its live chain" --> API
     end
 
@@ -80,7 +80,12 @@ flowchart TB
    overlay's `community_id` is derived from the event name, so nodes for
    different events form disjoint networks.
 9. The node serves its live chain over HTTP (`GET /tickets`, `GET /health`),
-   which is what the frontend reads for the P2P view of ticket availability.
+   which is what the frontend reads for the P2P view of ticket availability. It
+   also stores event artwork: the organizer's upload is `POST`ed to `/images`,
+   saved under the SHA-256 of its bytes, and served back from `/images/{hash}`.
+   Only that hash goes on-chain, and `TicketNFT.tokenURI` resolves it against
+   `imageBaseURI` — tickets minted without an upload carry an SVG generated
+   in the contract instead, so they render with no host at all.
 
 ## Blockchain core module layout
 
@@ -99,7 +104,8 @@ network/
                         chain sync, node startup
   bridge.py           — watches TicketNFT events and republishes them as
                         signed P2P transactions
-  api.py              — FastAPI app serving GET /tickets and GET /health
+  api.py              — FastAPI app: /tickets, /health, and content-addressed
+                        event artwork upload/serving at /images
   benchmark.py        — transaction, block-finality and P2P latency benchmarks
   test_blockchain.py  — 54 pytest tests (transactions, Merkle, PoW, chain,
                         puzzle, chain sync, HTTP API)

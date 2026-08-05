@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 /// @title TicketNFT
 /// @notice Event tickets represented as ERC-721 tokens for the TicketChain
@@ -25,6 +27,10 @@ contract TicketNFT is ERC721, Ownable {
         string name;
         /// @dev Unix timestamp (seconds) of the event start; 0 when unset.
         uint256 date;
+        /// @dev Content hash of the organizer's uploaded artwork, resolved
+        ///      against `imageBaseURI`. Empty when no image was uploaded, in
+        ///      which case tokenURI falls back to art generated on-chain.
+        string imageRef;
     }
 
     /// @notice An owner's standing offer to sell a ticket at `price`.
@@ -37,6 +43,13 @@ contract TicketNFT is ERC721, Ownable {
 
     /// @notice Hard-coded face value every ticket is issued at.
     uint256 public constant FACE_VALUE = 0.05 ether;
+
+    /// @notice Where uploaded artwork is served from — an event's `imageRef` is
+    ///         appended to this to form the image URL in the token metadata.
+    /// @dev Defaults to the local P2P node's image endpoint. Kept configurable
+    ///      because the host is deployment-specific, while the content hash
+    ///      stored per event is not.
+    string public imageBaseURI = "http://127.0.0.1:8080/images/";
 
     uint256 private _nextTokenId;
     uint256 private _nextEventId;
@@ -70,8 +83,13 @@ contract TicketNFT is ERC721, Ownable {
         // Event 0 is the fallback for tickets issued with mintTicket(), which
         // carries no event of its own.
         _nextEventId = 1;
-        eventDetails[0] = EventDetails({name: "General Admission", date: 0});
+        eventDetails[0] = EventDetails({name: "General Admission", date: 0, imageRef: ""});
         emit EventCreated(0, "General Admission", 0);
+    }
+
+    /// @notice Point token metadata at a different artwork host.
+    function setImageBaseURI(string calldata baseURI) external onlyOwner {
+        imageBaseURI = baseURI;
     }
 
     /// @notice Issue a new resellable ticket to `to` at the hard-coded face value.
@@ -86,21 +104,24 @@ contract TicketNFT is ERC721, Ownable {
     /// @param quantity  How many tickets to issue.
     /// @param name      Event name shown on every ticket in the batch.
     /// @param date      Event start as a Unix timestamp (seconds).
+    /// @param imageRef  Content hash of the organizer's uploaded artwork, or an
+    ///                  empty string to use the artwork generated on-chain.
     /// @dev The primary sale flows through resaleTransfer — one payment code
     ///      path, price ceiling enforced on first sale just like any resale.
     ///      Each call creates one event, so two batches are two events even if
     ///      the details match.
-    function mintAndList(uint256 quantity, string calldata name, uint256 date)
-        external
-        onlyOwner
-        returns (uint256 eventId)
-    {
+    function mintAndList(
+        uint256 quantity,
+        string calldata name,
+        uint256 date,
+        string calldata imageRef
+    ) external onlyOwner returns (uint256 eventId) {
         require(quantity > 0, "Quantity must be at least 1");
         require(bytes(name).length > 0, "Event name is required");
         require(date > 0, "Event date is required");
 
         eventId = _nextEventId++;
-        eventDetails[eventId] = EventDetails({name: name, date: date});
+        eventDetails[eventId] = EventDetails({name: name, date: date, imageRef: imageRef});
         emit EventCreated(eventId, name, date);
 
         for (uint256 i = 0; i < quantity; i++) {
@@ -110,17 +131,135 @@ contract TicketNFT is ERC721, Ownable {
         }
     }
 
-    /// @notice Name and date of the event a ticket admits to.
+    /// @notice Name, date and artwork URL of the event a ticket admits to.
     /// @dev One call per ticket for the frontend, instead of reading the token's
-    ///      event ID and then looking the event up separately.
+    ///      event ID and then looking the event up separately. `image` is the
+    ///      resolved URL of the organizer's upload, or empty when the ticket
+    ///      uses the artwork generated on-chain by tokenURI.
     function getTicketEvent(uint256 tokenId)
         external
         view
-        returns (string memory name, uint256 date)
+        returns (string memory name, uint256 date, string memory image)
     {
         _requireOwned(tokenId);
         EventDetails storage details = eventDetails[tickets[tokenId].eventId];
-        return (details.name, details.date);
+        return (details.name, details.date, _imageURL(details));
+    }
+
+    /// @notice ERC-721 metadata for `tokenId`, as a self-contained data URI.
+    /// @dev Built and base64-encoded on-chain so a wallet needs nothing but the
+    ///      contract to render a ticket. When the organizer uploaded artwork the
+    ///      metadata points at it; otherwise `image` carries an SVG generated
+    ///      here, so a ticket is never a blank square.
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        _requireOwned(tokenId);
+
+        Ticket storage ticket = tickets[tokenId];
+        EventDetails storage details = eventDetails[ticket.eventId];
+
+        string memory image = _imageURL(details);
+        if (bytes(image).length == 0) {
+            image = _generatedArtwork(tokenId, details.name);
+        }
+
+        string memory json = string.concat(
+            '{"name":"',
+            _escapeJson(details.name),
+            " #",
+            Strings.toString(tokenId),
+            '","description":"A TicketChain event pass. Resale is capped at the ',
+            'original face value, enforced by the contract itself.",',
+            '"image":"',
+            image,
+            '","attributes":[',
+            '{"trait_type":"Event","value":"',
+            _escapeJson(details.name),
+            '"},',
+            '{"display_type":"date","trait_type":"Event date","value":',
+            Strings.toString(details.date),
+            "},",
+            '{"trait_type":"Face value","value":"0.05 ETH"},',
+            '{"trait_type":"Token ID","value":',
+            Strings.toString(tokenId),
+            "}]}"
+        );
+
+        return string.concat(
+            "data:application/json;base64,",
+            Base64.encode(bytes(json))
+        );
+    }
+
+    /// @dev Resolved URL of an event's uploaded artwork, or "" when it has none.
+    function _imageURL(EventDetails storage details) private view returns (string memory) {
+        if (bytes(details.imageRef).length == 0) return "";
+        return string.concat(imageBaseURI, details.imageRef);
+    }
+
+    /// @dev Artwork for tickets with no uploaded image: an SVG built from the
+    ///      token ID, so every ticket looks like itself and needs no host.
+    function _generatedArtwork(uint256 tokenId, string memory name)
+        private
+        pure
+        returns (string memory)
+    {
+        // Two hues derived from the token ID — deterministic, and far enough
+        // apart that neighbouring tickets are visibly different.
+        uint256 hue = (tokenId * 47) % 360;
+        string memory from = string.concat("hsl(", Strings.toString(hue), ",85%,55%)");
+        string memory to = string.concat("hsl(", Strings.toString((hue + 60) % 360), ",75%,25%)");
+
+        string memory svg = string.concat(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">',
+            '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">',
+            '<stop offset="0%" stop-color="',
+            from,
+            '"/><stop offset="100%" stop-color="',
+            to,
+            '"/></linearGradient></defs>',
+            '<rect width="600" height="600" fill="url(#g)"/>',
+            '<rect x="30" y="30" width="540" height="540" fill="none" ',
+            'stroke="rgba(255,255,255,0.45)" stroke-width="2" rx="16"/>',
+            '<text x="60" y="440" font-family="monospace" font-size="26" ',
+            'fill="rgba(255,255,255,0.75)">TICKETCHAIN</text>',
+            '<text x="60" y="500" font-family="sans-serif" font-size="42" ',
+            'font-weight="700" fill="#ffffff">',
+            _escapeXml(name),
+            "</text>",
+            '<text x="60" y="545" font-family="monospace" font-size="28" ',
+            'fill="rgba(255,255,255,0.8)">#',
+            Strings.toString(tokenId),
+            "</text></svg>"
+        );
+
+        return string.concat("data:image/svg+xml;base64,", Base64.encode(bytes(svg)));
+    }
+
+    /// @dev Escape the characters that would break out of an XML text node.
+    function _escapeXml(string memory input) private pure returns (string memory out) {
+        bytes memory raw = bytes(input);
+        for (uint256 i = 0; i < raw.length; i++) {
+            bytes1 c = raw[i];
+            if (c == "&") out = string.concat(out, "&amp;");
+            else if (c == "<") out = string.concat(out, "&lt;");
+            else if (c == ">") out = string.concat(out, "&gt;");
+            else if (c == '"') out = string.concat(out, "&quot;");
+            else if (c == "'") out = string.concat(out, "&apos;");
+            else out = string.concat(out, string(abi.encodePacked(c)));
+        }
+    }
+
+    /// @dev Escape the characters that would break out of a JSON string.
+    function _escapeJson(string memory input) private pure returns (string memory out) {
+        bytes memory raw = bytes(input);
+        for (uint256 i = 0; i < raw.length; i++) {
+            bytes1 c = raw[i];
+            if (c == '"') out = string.concat(out, '\\"');
+            else if (c == "\\") out = string.concat(out, "\\\\");
+            // Control characters are illegal raw in JSON; drop them rather than
+            // emit a document a wallet cannot parse.
+            else if (uint8(c) >= 0x20) out = string.concat(out, string(abi.encodePacked(c)));
+        }
     }
 
     /// @dev Issue one ticket for `eventId` at face value. Shared by both mint

@@ -39,7 +39,7 @@ describe("TicketNFT", function () {
       const { ticket, alice } = await loadFixture(deployFixture);
       await ticket.mintTicket(alice.address);
       expect(await ticket.totalMinted()).to.equal(1);
-      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE);
+      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE, "");
       expect(await ticket.totalMinted()).to.equal(4);
     });
   });
@@ -49,7 +49,7 @@ describe("TicketNFT", function () {
       const { ticket, organizer } = await loadFixture(deployFixture);
       const price = await ticket.FACE_VALUE();
 
-      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE);
+      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE, "");
 
       expect(await ticket.ownerOf(0)).to.equal(organizer.address);
       expect(await ticket.ownerOf(1)).to.equal(organizer.address);
@@ -67,26 +67,26 @@ describe("TicketNFT", function () {
       const { ticket, organizer } = await loadFixture(deployFixture);
       const price = await ticket.FACE_VALUE();
 
-      await expect(ticket.mintAndList(1, EVENT_NAME, EVENT_DATE))
+      await expect(ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, ""))
         .to.emit(ticket, "TicketMinted").withArgs(organizer.address, 0, price)
         .and.to.emit(ticket, "TicketListed").withArgs(0, organizer.address, price);
     });
 
     it("reverts when called by a non-organizer", async function () {
       const { ticket, alice } = await loadFixture(deployFixture);
-      await expect(ticket.connect(alice).mintAndList(1, EVENT_NAME, EVENT_DATE))
+      await expect(ticket.connect(alice).mintAndList(1, EVENT_NAME, EVENT_DATE, ""))
         .to.be.revertedWithCustomError(ticket, "OwnableUnauthorizedAccount");
     });
 
     it("reverts with quantity 0", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await expect(ticket.mintAndList(0, EVENT_NAME, EVENT_DATE))
+      await expect(ticket.mintAndList(0, EVENT_NAME, EVENT_DATE, ""))
         .to.be.revertedWith("Quantity must be at least 1");
     });
 
     it("stores the event name and date against every ticket in the batch", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE);
+      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE, "");
 
       for (const tokenId of [0, 1, 2]) {
         const [name, date] = await ticket.getTicketEvent(tokenId);
@@ -97,7 +97,7 @@ describe("TicketNFT", function () {
 
     it("emits EventCreated once per batch, not once per ticket", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      const tx = await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE);
+      const tx = await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE, "");
       const receipt = await tx.wait();
 
       const created = receipt.logs.filter(
@@ -112,8 +112,8 @@ describe("TicketNFT", function () {
 
     it("keeps separate batches on separate events", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE);
-      await ticket.mintAndList(1, "Jazz Night", EVENT_DATE + 86400);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "");
+      await ticket.mintAndList(1, "Jazz Night", EVENT_DATE + 86400, "");
 
       const [firstName] = await ticket.getTicketEvent(0);
       const [secondName, secondDate] = await ticket.getTicketEvent(1);
@@ -124,20 +124,20 @@ describe("TicketNFT", function () {
 
     it("reverts without an event name", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await expect(ticket.mintAndList(1, "", EVENT_DATE))
+      await expect(ticket.mintAndList(1, "", EVENT_DATE, ""))
         .to.be.revertedWith("Event name is required");
     });
 
     it("reverts without an event date", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await expect(ticket.mintAndList(1, EVENT_NAME, 0))
+      await expect(ticket.mintAndList(1, EVENT_NAME, 0, ""))
         .to.be.revertedWith("Event date is required");
     });
 
     it("carries the event with the ticket through a resale", async function () {
       const { ticket, bob } = await loadFixture(deployFixture);
       const price = await ticket.FACE_VALUE();
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "");
       await ticket.connect(bob).resaleTransfer(0, { value: price });
 
       const [name, date] = await ticket.getTicketEvent(0);
@@ -148,7 +148,7 @@ describe("TicketNFT", function () {
     it("minted tickets are purchasable at face value — ETH goes to the organizer", async function () {
       const { ticket, organizer, bob } = await loadFixture(deployFixture);
       const price = await ticket.FACE_VALUE();
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "");
 
       await expect(
         ticket.connect(bob).resaleTransfer(0, { value: price })
@@ -156,6 +156,102 @@ describe("TicketNFT", function () {
 
       expect(await ticket.ownerOf(0)).to.equal(bob.address);
       expect((await ticket.listings(0)).active).to.equal(false);
+    });
+  });
+
+  describe("tokenURI (ticket artwork)", function () {
+    const IMAGE_HASH = "b1946ac92492d2347c6235b4d2611184";
+
+    /** Decode the base64 metadata document a token URI carries. */
+    function decodeMetadata(uri) {
+      expect(uri).to.match(/^data:application\/json;base64,/);
+      const payload = uri.slice("data:application/json;base64,".length);
+      return JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+    }
+
+    it("returns metadata a wallet can parse, naming the event and token", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "");
+
+      const metadata = decodeMetadata(await ticket.tokenURI(0));
+      expect(metadata.name).to.equal(`${EVENT_NAME} #0`);
+      expect(metadata.description).to.contain("face value");
+
+      const attributes = Object.fromEntries(
+        metadata.attributes.map((a) => [a.trait_type, a.value])
+      );
+      expect(attributes.Event).to.equal(EVENT_NAME);
+      expect(attributes["Event date"]).to.equal(EVENT_DATE);
+      expect(attributes["Face value"]).to.equal("0.05 ETH");
+      expect(attributes["Token ID"]).to.equal(0);
+    });
+
+    it("falls back to artwork generated on-chain when no image was uploaded", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "");
+
+      const { image } = decodeMetadata(await ticket.tokenURI(0));
+      expect(image).to.match(/^data:image\/svg\+xml;base64,/);
+
+      const svg = Buffer.from(image.split(",")[1], "base64").toString("utf8");
+      expect(svg).to.contain("<svg");
+      expect(svg).to.contain(EVENT_NAME);
+      expect(svg).to.contain("#0");
+    });
+
+    it("points at the uploaded artwork when the organizer supplied one", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, IMAGE_HASH);
+
+      const { image } = decodeMetadata(await ticket.tokenURI(0));
+      expect(image).to.equal(`http://127.0.0.1:8080/images/${IMAGE_HASH}`);
+    });
+
+    it("resolves uploaded artwork against an updated base URI", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, IMAGE_HASH);
+      await ticket.setImageBaseURI("https://cdn.example/art/");
+
+      const { image } = decodeMetadata(await ticket.tokenURI(0));
+      expect(image).to.equal(`https://cdn.example/art/${IMAGE_HASH}`);
+    });
+
+    it("rejects setImageBaseURI from a non-organizer", async function () {
+      const { ticket, alice } = await loadFixture(deployFixture);
+      await expect(ticket.connect(alice).setImageBaseURI("https://evil.example/"))
+        .to.be.revertedWithCustomError(ticket, "OwnableUnauthorizedAccount");
+    });
+
+    it("gives generated art a different gradient per token", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE, "");
+
+      const [first, second] = await Promise.all(
+        [0, 1].map(async (id) => {
+          const { image } = decodeMetadata(await ticket.tokenURI(id));
+          return Buffer.from(image.split(",")[1], "base64").toString("utf8");
+        })
+      );
+      expect(first).to.not.equal(second);
+    });
+
+    it("escapes an event name that would otherwise break the JSON or the SVG", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      // Quotes break JSON, ampersands and angle brackets break XML.
+      await ticket.mintAndList(1, 'Rock & "Roll" <Live>', EVENT_DATE, "");
+
+      // Parsing at all is the assertion: a raw quote would throw here.
+      const metadata = decodeMetadata(await ticket.tokenURI(0));
+      expect(metadata.name).to.equal('Rock & "Roll" <Live> #0');
+
+      const svg = Buffer.from(metadata.image.split(",")[1], "base64").toString("utf8");
+      expect(svg).to.contain("Rock &amp; &quot;Roll&quot; &lt;Live&gt;");
+    });
+
+    it("reverts for a nonexistent ticket", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await expect(ticket.tokenURI(99))
+        .to.be.revertedWithCustomError(ticket, "ERC721NonexistentToken");
     });
   });
 

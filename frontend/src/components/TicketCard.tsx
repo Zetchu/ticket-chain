@@ -36,7 +36,7 @@ export default function TicketCard({
   /** Re-read on-chain state after a write confirms. */
   onChainRefresh: () => void;
 }) {
-  const { ticket, owner, listing, isOwnedByViewer } = entry;
+  const { ticket, owner, listing, isOwnedByViewer, imageUrl } = entry;
   const [isListingFormRequested, setListingFormRequested] = useState(false);
 
   const write = useTicketWrite(onChainRefresh);
@@ -104,7 +104,7 @@ export default function TicketCard({
       }}
     >
       <Box sx={{ position: 'relative' }}>
-        <TicketArtwork tokenId={ticket.id} />
+        <TicketArtwork tokenId={ticket.id} imageUrl={imageUrl} />
         <Box sx={{ position: 'absolute', top: 12, right: 12 }}>
           <StatusChip
             tone={isListed ? 'cyan' : 'neutral'}

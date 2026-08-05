@@ -1,14 +1,16 @@
 import { Box } from '@mui/material';
 import ConfirmationNumberOutlinedIcon from '@mui/icons-material/ConfirmationNumberOutlined';
+import { useState } from 'react';
 import { monoLabelSx, tokens } from '../theme';
 
 /**
- * Placeholder artwork for a ticket.
+ * Artwork for a ticket.
  *
- * Tickets carry no image on-chain yet, so rather than shipping a single grey
- * box for every card, the token ID seeds a deterministic gradient: each ticket
- * looks like itself, the same way every time, with no network request. Swap the
- * whole component out once real metadata/IPFS art exists.
+ * Shows the image the organizer uploaded for the event, which the contract
+ * stores as a content hash and the P2P node serves. Tickets minted without one
+ * fall back to a gradient seeded by the token ID, so a card is never an empty
+ * grey box — and so is a ticket whose image fails to load, which on a localized
+ * network means the node holding it is simply not reachable from here.
  */
 
 const PALETTES = [
@@ -22,14 +24,31 @@ const PALETTES = [
 
 export default function TicketArtwork({
   tokenId,
+  imageUrl,
   height = 168,
 }: {
   tokenId: number;
+  /** Organizer's uploaded artwork, as resolved by the contract. */
+  imageUrl?: string;
   height?: number;
 }) {
+  const [hasFailed, setFailed] = useState(false);
   const [from, to] = PALETTES[tokenId % PALETTES.length];
   // Rotate the gradient per token as well, so neighbouring IDs differ visibly.
   const angle = 130 + ((tokenId * 37) % 90);
+
+  if (imageUrl && !hasFailed) {
+    return (
+      <Box
+        component='img'
+        src={imageUrl}
+        alt=''
+        loading='lazy'
+        onError={() => setFailed(true)}
+        sx={{ display: 'block', width: '100%', height, objectFit: 'cover' }}
+      />
+    );
+  }
 
   return (
     <Box

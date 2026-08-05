@@ -26,6 +26,10 @@ PIDS=()
 
 echo "🚀 Starting TicketChain Two-Node Demo..."
 
+# Same reason as start_dev.sh: never inherit a half-running stack.
+"$ROOT/stop_dev.sh"
+echo ""
+
 cleanup() {
   echo ""
   echo "🛑 Shutting down TicketChain..."

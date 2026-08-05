@@ -10,6 +10,12 @@ PIDS=()
 
 echo "🚀 Starting TicketChain Development Environment..."
 
+# Clear out anything left from a previous run before claiming the ports — an
+# orphaned Hardhat node or Vite server would otherwise make this run fail in a
+# way that looks like a broken app rather than a stale process.
+"$ROOT/stop_dev.sh"
+echo ""
+
 cleanup() {
   echo ""
   echo "🛑 Shutting down TicketChain..."
