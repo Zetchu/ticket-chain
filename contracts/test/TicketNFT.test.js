@@ -1,5 +1,5 @@
 const { expect } = require("chai");
-const { loadFixture } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
+const { loadFixture, time } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 const { ethers } = require("hardhat");
 
 describe("TicketNFT", function () {
@@ -746,6 +746,73 @@ describe("TicketNFT", function () {
         await ticket.connect(bob).resaleTransfer(tokenId, { value: FACE });
       }
       expect(await ticket.ownerOf(4)).to.equal(bob.address);
+    });
+  });
+
+  describe("Event expiry", function () {
+    // Event dated one hour ahead of the current block time. Every expiry
+    // test starts here; the ones that need to be past-expiry call
+    // time.increaseTo(EVENT_TIME + 1) to jump the chain clock past it.
+    async function futureEventFixture() {
+      const state = await loadFixture(deployFixture);
+      const eventTime = (await time.latest()) + 3600;
+      await state.ticket.mintAndList(2, EVENT_NAME, eventTime, "", FACE, 0);
+      return { ...state, eventTime };
+    }
+
+    it("listForSale reverts once the event has started", async function () {
+      const { ticket, bob, eventTime } = await loadFixture(futureEventFixture);
+      // Buyer takes the ticket on primary sale before expiry.
+      await ticket.connect(bob).resaleTransfer(0, { value: FACE });
+      // Chain jumps to just past the event start.
+      await time.increaseTo(eventTime + 1);
+      await expect(
+        ticket.connect(bob).listForSale(0, FACE)
+      ).to.be.revertedWith("Event has already started");
+    });
+
+    it("resaleTransfer reverts once the event has started", async function () {
+      const { ticket, alice, bob, eventTime } = await loadFixture(futureEventFixture);
+      // Alice buys primary, lists at face value while the event is still upcoming.
+      await ticket.connect(alice).resaleTransfer(0, { value: FACE });
+      await ticket.connect(alice).listForSale(0, FACE);
+      await time.increaseTo(eventTime + 1);
+      await expect(
+        ticket.connect(bob).resaleTransfer(0, { value: FACE })
+      ).to.be.revertedWith("Event has already started");
+    });
+
+    it("a future event is unaffected", async function () {
+      const { ticket, alice, bob } = await loadFixture(deployFixture);
+      const eventTime = (await time.latest()) + 3600;
+      await ticket.mintAndList(1, EVENT_NAME, eventTime, "", FACE, 0);
+      // Full primary + resale flow, no time travel — should just work.
+      await ticket.connect(alice).resaleTransfer(0, { value: FACE });
+      await ticket.connect(alice).listForSale(0, FACE);
+      await expect(
+        ticket.connect(bob).resaleTransfer(0, { value: FACE })
+      ).not.to.be.reverted;
+      expect(await ticket.ownerOf(0)).to.equal(bob.address);
+    });
+
+    it("mintAndList rejects past-dated events", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      const past = (await time.latest()) - 1;
+      await expect(
+        ticket.mintAndList(1, EVENT_NAME, past, "", FACE, 0)
+      ).to.be.revertedWith("Event date must be in the future");
+    });
+
+    it("event 0 tickets (mintTicket fallback) remain listable and buyable", async function () {
+      const { ticket, alice, bob } = await loadFixture(deployFixture);
+      await ticket.mintTicket(alice.address);
+      const price = await ticket.DEFAULT_FACE_VALUE();
+      // Event 0 has date == 0, so the expiry short-circuit must pass.
+      await expect(ticket.connect(alice).listForSale(0, price)).not.to.be.reverted;
+      await expect(
+        ticket.connect(bob).resaleTransfer(0, { value: price })
+      ).not.to.be.reverted;
+      expect(await ticket.ownerOf(0)).to.equal(bob.address);
     });
   });
 });
