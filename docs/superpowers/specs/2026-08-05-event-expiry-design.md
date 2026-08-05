@@ -99,7 +99,10 @@ Three touchpoints:
 2. **Non-owner Buy button.** When `isExpired`, disable with label
    `Event started`. Placed in the button's label chain after `!isListed`
    and before `capReached`, so an unlisted expired ticket still shows
-   "Not for sale" (which is the more specific state).
+   "Not for sale" (which is the more specific state). Full label chain
+   order after this change:
+   `busyLabel → isConfirmed('buy') → !isChainStateLoaded → !isListed →
+   isExpired → capReached → isConnected → 'Buy Ticket' / 'Connect to buy'`.
 3. **Owner actions.** When `isExpired`, replace the List / Change-price /
    Unlist controls with a single disabled button labelled `Event started`.
    Prevents the owner sending a doomed `cancelListing` tx.
