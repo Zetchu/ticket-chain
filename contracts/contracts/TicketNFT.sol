@@ -69,6 +69,11 @@ contract TicketNFT is ERC721, Ownable {
     /// @notice Active resale offers per token ID.
     mapping(uint256 tokenId => Listing) public listings;
 
+    /// @notice How many primary-sale tickets each wallet has bought per event.
+    /// @dev Only incremented in resaleTransfer when the seller is the organizer
+    ///      (owner()) — see the primary-sale definition on maxPerBuyer.
+    mapping(uint256 eventId => mapping(address buyer => uint256 bought)) public primaryBought;
+
     /// @dev Set while a resaleTransfer is in flight so _update can distinguish
     ///      contract-mediated sales from raw ERC-721 transfers (which are
     ///      blocked — an off-chain scalper deal would bypass the price check).
@@ -376,6 +381,24 @@ contract TicketNFT is ERC721, Ownable {
         require(tickets[tokenId].isResellable, "Ticket is not resellable");
         require(msg.sender != seller, "Cannot buy your own ticket");
         require(msg.value == listing.price, "Payment must equal the listed price");
+
+        // Primary sale = seller is the organizer. Secondary sales stay
+        // uncapped: the face-value ceiling already prevents scalping there,
+        // and capping them would block legitimate resale. The "seller ==
+        // owner()" choice is documented in the spec; the trade-off is that
+        // if the organizer buys back and re-sells, that re-sale counts as
+        // primary again.
+        if (seller == owner()) {
+            uint256 eventId = tickets[tokenId].eventId;
+            uint256 cap = eventDetails[eventId].maxPerBuyer;
+            if (cap != 0) {
+                require(
+                    primaryBought[eventId][msg.sender] < cap,
+                    "Primary purchase limit reached for this event"
+                );
+            }
+            primaryBought[eventId][msg.sender] += 1;
+        }
 
         // Clear the listing before transferring: the sale is done, and the new
         // owner must make their own offer before the ticket can move again.

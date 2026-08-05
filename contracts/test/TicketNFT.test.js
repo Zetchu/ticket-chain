@@ -696,4 +696,56 @@ describe("TicketNFT", function () {
       expect(await ticket.ownerOf(0)).to.equal(alice.address);
     });
   });
+
+  describe("Primary purchase cap", function () {
+    // Batch minted for cap tests: cap = 2, 5 tickets so a wallet can try a 3rd.
+    async function cappedBatchFixture() {
+      const state = await loadFixture(deployFixture);
+      await state.ticket.mintAndList(5, EVENT_NAME, EVENT_DATE, "", FACE, 2);
+      return state;
+    }
+
+    it("reverts the third primary purchase from the same address", async function () {
+      const { ticket, bob } = await loadFixture(cappedBatchFixture);
+      await ticket.connect(bob).resaleTransfer(0, { value: FACE });
+      await ticket.connect(bob).resaleTransfer(1, { value: FACE });
+      await expect(
+        ticket.connect(bob).resaleTransfer(2, { value: FACE })
+      ).to.be.revertedWith("Primary purchase limit reached for this event");
+    });
+
+    it("does not count secondary-market resale against the cap", async function () {
+      const { ticket, alice, bob } = await loadFixture(cappedBatchFixture);
+      // Bob buys his 2 primary tickets.
+      await ticket.connect(bob).resaleTransfer(0, { value: FACE });
+      await ticket.connect(bob).resaleTransfer(1, { value: FACE });
+      // Alice buys token 2 primary, then re-lists it.
+      await ticket.connect(alice).resaleTransfer(2, { value: FACE });
+      await ticket.connect(alice).listForSale(2, FACE);
+      // Bob buys from Alice on the secondary market — allowed, cap ignored.
+      await expect(
+        ticket.connect(bob).resaleTransfer(2, { value: FACE })
+      ).not.to.be.reverted;
+      expect(await ticket.ownerOf(2)).to.equal(bob.address);
+    });
+
+    it("gives every address its own primary-sale allowance", async function () {
+      const { ticket, alice, bob } = await loadFixture(cappedBatchFixture);
+      await ticket.connect(alice).resaleTransfer(0, { value: FACE });
+      await ticket.connect(alice).resaleTransfer(1, { value: FACE });
+      await ticket.connect(bob).resaleTransfer(2, { value: FACE });
+      await ticket.connect(bob).resaleTransfer(3, { value: FACE });
+      expect(await ticket.ownerOf(0)).to.equal(alice.address);
+      expect(await ticket.ownerOf(3)).to.equal(bob.address);
+    });
+
+    it("treats maxPerBuyer = 0 as unlimited", async function () {
+      const { ticket, bob } = await loadFixture(deployFixture);
+      await ticket.mintAndList(5, EVENT_NAME, EVENT_DATE, "", FACE, 0);
+      for (let tokenId = 0; tokenId < 5; tokenId++) {
+        await ticket.connect(bob).resaleTransfer(tokenId, { value: FACE });
+      }
+      expect(await ticket.ownerOf(4)).to.equal(bob.address);
+    });
+  });
 });
