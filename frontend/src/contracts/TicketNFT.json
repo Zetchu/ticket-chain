@@ -439,6 +439,11 @@
           "internalType": "string",
           "name": "imageRef",
           "type": "string"
+        },
+        {
+          "internalType": "uint256",
+          "name": "maxPerBuyer",
+          "type": "uint256"
         }
       ],
       "stateMutability": "view",
@@ -510,6 +515,11 @@
         {
           "internalType": "uint256",
           "name": "faceValue",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "maxPerBuyer",
           "type": "uint256"
         }
       ],
@@ -621,6 +631,11 @@
           "internalType": "uint256",
           "name": "faceValue",
           "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "maxPerBuyer",
+          "type": "uint256"
         }
       ],
       "name": "mintAndList",
@@ -693,6 +708,30 @@
           "internalType": "address",
           "name": "",
           "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "eventId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "buyer",
+          "type": "address"
+        }
+      ],
+      "name": "primaryBought",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "bought",
+          "type": "uint256"
         }
       ],
       "stateMutability": "view",

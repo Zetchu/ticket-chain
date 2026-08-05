@@ -37,7 +37,7 @@ describe("TicketNFT", function () {
 
     it("mints and lists a batch at the organizer's chosen face value", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE, "", PREMIUM);
+      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE, "", PREMIUM, 0);
 
       for (const tokenId of [0, 1]) {
         const [faceValue] = await ticket.tickets(tokenId);
@@ -50,13 +50,13 @@ describe("TicketNFT", function () {
 
     it("rejects a zero face value", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await expect(ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", 0))
+      await expect(ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", 0, 0))
         .to.be.revertedWith("Face value is required");
     });
 
     it("caps resale listings at the batch's own face value", async function () {
       const { ticket, bob } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", PREMIUM);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", PREMIUM, 0);
       await ticket.connect(bob).resaleTransfer(0, { value: PREMIUM });
 
       // At the 0.2 ceiling: fine. Above it: scalping.
@@ -68,8 +68,8 @@ describe("TicketNFT", function () {
 
     it("lets two events with different prices coexist", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, "Basement Gig", EVENT_DATE, "", FACE);
-      await ticket.mintAndList(1, "Festival Weekend Pass", EVENT_DATE, "", PREMIUM);
+      await ticket.mintAndList(1, "Basement Gig", EVENT_DATE, "", FACE, 0);
+      await ticket.mintAndList(1, "Festival Weekend Pass", EVENT_DATE, "", PREMIUM, 0);
 
       const [, , , cheapFace] = await ticket.getTicketEvent(0);
       const [, , , premiumFace] = await ticket.getTicketEvent(1);
@@ -79,7 +79,7 @@ describe("TicketNFT", function () {
 
     it("getTicketEvent reports the ticket's own face value", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", PREMIUM);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", PREMIUM, 0);
       const [name, date, , faceValue] = await ticket.getTicketEvent(0);
       expect(name).to.equal(EVENT_NAME);
       expect(date).to.equal(EVENT_DATE);
@@ -88,7 +88,7 @@ describe("TicketNFT", function () {
 
     it("tokenURI reports the ticket's real face value", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", PREMIUM);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", PREMIUM, 0);
 
       const uri = await ticket.tokenURI(0);
       const json = JSON.parse(
@@ -100,7 +100,7 @@ describe("TicketNFT", function () {
 
     it("a purchase of a premium ticket settles at its price", async function () {
       const { ticket, organizer, bob } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", PREMIUM);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", PREMIUM, 0);
 
       await expect(
         ticket.connect(bob).resaleTransfer(0, { value: PREMIUM })
@@ -119,17 +119,25 @@ describe("TicketNFT", function () {
       const { ticket, alice } = await loadFixture(deployFixture);
       await ticket.mintTicket(alice.address);
       expect(await ticket.totalMinted()).to.equal(1);
-      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE, "", FACE);
+      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE, "", FACE, 0);
       expect(await ticket.totalMinted()).to.equal(4);
     });
   });
 
   describe("mintAndList (primary market)", function () {
+    it("stores maxPerBuyer against the event and exposes it via getTicketEvent", async function () {
+      const { ticket } = await loadFixture(deployFixture);
+      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE, "", FACE, 3);
+
+      const [, , , , maxPerBuyer] = await ticket.getTicketEvent(0);
+      expect(maxPerBuyer).to.equal(3);
+    });
+
     it("mints to the organizer and lists each ticket at face value", async function () {
       const { ticket, organizer } = await loadFixture(deployFixture);
       const price = await ticket.DEFAULT_FACE_VALUE();
 
-      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE, "", FACE);
+      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE, "", FACE, 0);
 
       expect(await ticket.ownerOf(0)).to.equal(organizer.address);
       expect(await ticket.ownerOf(1)).to.equal(organizer.address);
@@ -147,26 +155,26 @@ describe("TicketNFT", function () {
       const { ticket, organizer } = await loadFixture(deployFixture);
       const price = await ticket.DEFAULT_FACE_VALUE();
 
-      await expect(ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE))
+      await expect(ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE, 0))
         .to.emit(ticket, "TicketMinted").withArgs(organizer.address, 0, price)
         .and.to.emit(ticket, "TicketListed").withArgs(0, organizer.address, price);
     });
 
     it("reverts when called by a non-organizer", async function () {
       const { ticket, alice } = await loadFixture(deployFixture);
-      await expect(ticket.connect(alice).mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE))
+      await expect(ticket.connect(alice).mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE, 0))
         .to.be.revertedWithCustomError(ticket, "OwnableUnauthorizedAccount");
     });
 
     it("reverts with quantity 0", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await expect(ticket.mintAndList(0, EVENT_NAME, EVENT_DATE, "", FACE))
+      await expect(ticket.mintAndList(0, EVENT_NAME, EVENT_DATE, "", FACE, 0))
         .to.be.revertedWith("Quantity must be at least 1");
     });
 
     it("stores the event name and date against every ticket in the batch", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE, "", FACE);
+      await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE, "", FACE, 0);
 
       for (const tokenId of [0, 1, 2]) {
         const [name, date] = await ticket.getTicketEvent(tokenId);
@@ -177,7 +185,7 @@ describe("TicketNFT", function () {
 
     it("emits EventCreated once per batch, not once per ticket", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      const tx = await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE, "", FACE);
+      const tx = await ticket.mintAndList(3, EVENT_NAME, EVENT_DATE, "", FACE, 0);
       const receipt = await tx.wait();
 
       const created = receipt.logs.filter(
@@ -192,8 +200,8 @@ describe("TicketNFT", function () {
 
     it("keeps separate batches on separate events", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE);
-      await ticket.mintAndList(1, "Jazz Night", EVENT_DATE + 86400, "", FACE);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE, 0);
+      await ticket.mintAndList(1, "Jazz Night", EVENT_DATE + 86400, "", FACE, 0);
 
       const [firstName] = await ticket.getTicketEvent(0);
       const [secondName, secondDate] = await ticket.getTicketEvent(1);
@@ -204,20 +212,20 @@ describe("TicketNFT", function () {
 
     it("reverts without an event name", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await expect(ticket.mintAndList(1, "", EVENT_DATE, "", FACE))
+      await expect(ticket.mintAndList(1, "", EVENT_DATE, "", FACE, 0))
         .to.be.revertedWith("Event name is required");
     });
 
     it("reverts without an event date", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await expect(ticket.mintAndList(1, EVENT_NAME, 0, "", FACE))
+      await expect(ticket.mintAndList(1, EVENT_NAME, 0, "", FACE, 0))
         .to.be.revertedWith("Event date is required");
     });
 
     it("carries the event with the ticket through a resale", async function () {
       const { ticket, bob } = await loadFixture(deployFixture);
       const price = await ticket.DEFAULT_FACE_VALUE();
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE, 0);
       await ticket.connect(bob).resaleTransfer(0, { value: price });
 
       const [name, date] = await ticket.getTicketEvent(0);
@@ -228,7 +236,7 @@ describe("TicketNFT", function () {
     it("minted tickets are purchasable at face value — ETH goes to the organizer", async function () {
       const { ticket, organizer, bob } = await loadFixture(deployFixture);
       const price = await ticket.DEFAULT_FACE_VALUE();
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE, 0);
 
       await expect(
         ticket.connect(bob).resaleTransfer(0, { value: price })
@@ -251,7 +259,7 @@ describe("TicketNFT", function () {
 
     it("returns metadata a wallet can parse, naming the event and token", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE, 0);
 
       const metadata = decodeMetadata(await ticket.tokenURI(0));
       expect(metadata.name).to.equal(`${EVENT_NAME} #0`);
@@ -268,7 +276,7 @@ describe("TicketNFT", function () {
 
     it("falls back to artwork generated on-chain when no image was uploaded", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, "", FACE, 0);
 
       const { image } = decodeMetadata(await ticket.tokenURI(0));
       expect(image).to.match(/^data:image\/svg\+xml;base64,/);
@@ -281,7 +289,7 @@ describe("TicketNFT", function () {
 
     it("points at the uploaded artwork when the organizer supplied one", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, IMAGE_HASH, FACE);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, IMAGE_HASH, FACE, 0);
 
       const { image } = decodeMetadata(await ticket.tokenURI(0));
       expect(image).to.equal(`http://127.0.0.1:8080/images/${IMAGE_HASH}`);
@@ -289,7 +297,7 @@ describe("TicketNFT", function () {
 
     it("resolves uploaded artwork against an updated base URI", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, IMAGE_HASH, FACE);
+      await ticket.mintAndList(1, EVENT_NAME, EVENT_DATE, IMAGE_HASH, FACE, 0);
       await ticket.setImageBaseURI("https://cdn.example/art/");
 
       const { image } = decodeMetadata(await ticket.tokenURI(0));
@@ -304,7 +312,7 @@ describe("TicketNFT", function () {
 
     it("gives generated art a different gradient per token", async function () {
       const { ticket } = await loadFixture(deployFixture);
-      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE, "", FACE);
+      await ticket.mintAndList(2, EVENT_NAME, EVENT_DATE, "", FACE, 0);
 
       const [first, second] = await Promise.all(
         [0, 1].map(async (id) => {
@@ -318,7 +326,7 @@ describe("TicketNFT", function () {
     it("escapes an event name that would otherwise break the JSON or the SVG", async function () {
       const { ticket } = await loadFixture(deployFixture);
       // Quotes break JSON, ampersands and angle brackets break XML.
-      await ticket.mintAndList(1, 'Rock & "Roll" <Live>', EVENT_DATE, "", FACE);
+      await ticket.mintAndList(1, 'Rock & "Roll" <Live>', EVENT_DATE, "", FACE, 0);
 
       // Parsing at all is the assertion: a raw quote would throw here.
       const metadata = decodeMetadata(await ticket.tokenURI(0));
@@ -686,6 +694,58 @@ describe("TicketNFT", function () {
       ).to.be.revertedWith("Transfers only allowed through resaleTransfer");
       // ticket never moved despite the blanket approval
       expect(await ticket.ownerOf(0)).to.equal(alice.address);
+    });
+  });
+
+  describe("Primary purchase cap", function () {
+    // Batch minted for cap tests: cap = 2, 5 tickets so a wallet can try a 3rd.
+    async function cappedBatchFixture() {
+      const state = await loadFixture(deployFixture);
+      await state.ticket.mintAndList(5, EVENT_NAME, EVENT_DATE, "", FACE, 2);
+      return state;
+    }
+
+    it("reverts the third primary purchase from the same address", async function () {
+      const { ticket, bob } = await loadFixture(cappedBatchFixture);
+      await ticket.connect(bob).resaleTransfer(0, { value: FACE });
+      await ticket.connect(bob).resaleTransfer(1, { value: FACE });
+      await expect(
+        ticket.connect(bob).resaleTransfer(2, { value: FACE })
+      ).to.be.revertedWith("Primary purchase limit reached for this event");
+    });
+
+    it("does not count secondary-market resale against the cap", async function () {
+      const { ticket, alice, bob } = await loadFixture(cappedBatchFixture);
+      // Bob buys his 2 primary tickets.
+      await ticket.connect(bob).resaleTransfer(0, { value: FACE });
+      await ticket.connect(bob).resaleTransfer(1, { value: FACE });
+      // Alice buys token 2 primary, then re-lists it.
+      await ticket.connect(alice).resaleTransfer(2, { value: FACE });
+      await ticket.connect(alice).listForSale(2, FACE);
+      // Bob buys from Alice on the secondary market — allowed, cap ignored.
+      await expect(
+        ticket.connect(bob).resaleTransfer(2, { value: FACE })
+      ).not.to.be.reverted;
+      expect(await ticket.ownerOf(2)).to.equal(bob.address);
+    });
+
+    it("gives every address its own primary-sale allowance", async function () {
+      const { ticket, alice, bob } = await loadFixture(cappedBatchFixture);
+      await ticket.connect(alice).resaleTransfer(0, { value: FACE });
+      await ticket.connect(alice).resaleTransfer(1, { value: FACE });
+      await ticket.connect(bob).resaleTransfer(2, { value: FACE });
+      await ticket.connect(bob).resaleTransfer(3, { value: FACE });
+      expect(await ticket.ownerOf(0)).to.equal(alice.address);
+      expect(await ticket.ownerOf(3)).to.equal(bob.address);
+    });
+
+    it("treats maxPerBuyer = 0 as unlimited", async function () {
+      const { ticket, bob } = await loadFixture(deployFixture);
+      await ticket.mintAndList(5, EVENT_NAME, EVENT_DATE, "", FACE, 0);
+      for (let tokenId = 0; tokenId < 5; tokenId++) {
+        await ticket.connect(bob).resaleTransfer(tokenId, { value: FACE });
+      }
+      expect(await ticket.ownerOf(4)).to.equal(bob.address);
     });
   });
 });

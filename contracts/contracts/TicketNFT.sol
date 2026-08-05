@@ -31,6 +31,11 @@ contract TicketNFT is ERC721, Ownable {
         ///      against `imageBaseURI`. Empty when no image was uploaded, in
         ///      which case tokenURI falls back to art generated on-chain.
         string imageRef;
+        /// @dev Per-event cap on primary-sale purchases by any one address.
+        ///      0 means unlimited. Enforced in resaleTransfer when the seller
+        ///      is the organizer (owner()). Set at mint time; permanent for
+        ///      the batch, matching the invariant used for faceValue.
+        uint256 maxPerBuyer;
     }
 
     /// @notice An owner's standing offer to sell a ticket at `price`.
@@ -64,6 +69,11 @@ contract TicketNFT is ERC721, Ownable {
     /// @notice Active resale offers per token ID.
     mapping(uint256 tokenId => Listing) public listings;
 
+    /// @notice How many primary-sale tickets each wallet has bought per event.
+    /// @dev Only incremented in resaleTransfer when the seller is the organizer
+    ///      (owner()) — see the primary-sale definition on maxPerBuyer.
+    mapping(uint256 eventId => mapping(address buyer => uint256 bought)) public primaryBought;
+
     /// @dev Set while a resaleTransfer is in flight so _update can distinguish
     ///      contract-mediated sales from raw ERC-721 transfers (which are
     ///      blocked — an off-chain scalper deal would bypass the price check).
@@ -84,7 +94,7 @@ contract TicketNFT is ERC721, Ownable {
         // Event 0 is the fallback for tickets issued with mintTicket(), which
         // carries no event of its own.
         _nextEventId = 1;
-        eventDetails[0] = EventDetails({name: "General Admission", date: 0, imageRef: ""});
+        eventDetails[0] = EventDetails({name: "General Admission", date: 0, imageRef: "", maxPerBuyer: 0});
         emit EventCreated(0, "General Admission", 0);
     }
 
@@ -121,7 +131,8 @@ contract TicketNFT is ERC721, Ownable {
         string calldata name,
         uint256 date,
         string calldata imageRef,
-        uint256 faceValue
+        uint256 faceValue,
+        uint256 maxPerBuyer
     ) external onlyOwner returns (uint256 eventId) {
         require(quantity > 0, "Quantity must be at least 1");
         require(bytes(name).length > 0, "Event name is required");
@@ -129,7 +140,12 @@ contract TicketNFT is ERC721, Ownable {
         require(faceValue > 0, "Face value is required");
 
         eventId = _nextEventId++;
-        eventDetails[eventId] = EventDetails({name: name, date: date, imageRef: imageRef});
+        eventDetails[eventId] = EventDetails({
+            name: name,
+            date: date,
+            imageRef: imageRef,
+            maxPerBuyer: maxPerBuyer
+        });
         emit EventCreated(eventId, name, date);
 
         for (uint256 i = 0; i < quantity; i++) {
@@ -149,12 +165,18 @@ contract TicketNFT is ERC721, Ownable {
     function getTicketEvent(uint256 tokenId)
         external
         view
-        returns (string memory name, uint256 date, string memory image, uint256 faceValue)
+        returns (
+            string memory name,
+            uint256 date,
+            string memory image,
+            uint256 faceValue,
+            uint256 maxPerBuyer
+        )
     {
         _requireOwned(tokenId);
         Ticket storage ticket = tickets[tokenId];
         EventDetails storage details = eventDetails[ticket.eventId];
-        return (details.name, details.date, _imageURL(details), ticket.faceValue);
+        return (details.name, details.date, _imageURL(details), ticket.faceValue, details.maxPerBuyer);
     }
 
     /// @notice ERC-721 metadata for `tokenId`, as a self-contained data URI.
@@ -359,6 +381,24 @@ contract TicketNFT is ERC721, Ownable {
         require(tickets[tokenId].isResellable, "Ticket is not resellable");
         require(msg.sender != seller, "Cannot buy your own ticket");
         require(msg.value == listing.price, "Payment must equal the listed price");
+
+        // Primary sale = seller is the organizer. Secondary sales stay
+        // uncapped: the face-value ceiling already prevents scalping there,
+        // and capping them would block legitimate resale. The "seller ==
+        // owner()" choice is documented in the spec; the trade-off is that
+        // if the organizer buys back and re-sells, that re-sale counts as
+        // primary again.
+        if (seller == owner()) {
+            uint256 eventId = tickets[tokenId].eventId;
+            uint256 cap = eventDetails[eventId].maxPerBuyer;
+            if (cap != 0) {
+                require(
+                    primaryBought[eventId][msg.sender] < cap,
+                    "Primary purchase limit reached for this event"
+                );
+            }
+            primaryBought[eventId][msg.sender] += 1;
+        }
 
         // Clear the listing before transferring: the sale is done, and the new
         // owner must make their own offer before the ticket can move again.

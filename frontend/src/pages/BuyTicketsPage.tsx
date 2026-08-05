@@ -9,7 +9,7 @@ import { useTicketBoard } from '../hooks/useTicketBoard';
 
 export default function BuyTicketsPage() {
   const { isConnected } = useConnection();
-  const { market, owned, isPending, isError, error, refresh } = useTicketBoard();
+  const { market, owned, owner, isPending, isError, error, refresh } = useTicketBoard();
 
   const listedCount = market.filter((entry) => entry.listing?.active).length;
 
@@ -43,6 +43,7 @@ export default function BuyTicketsPage() {
             entries={market}
             isConnected={isConnected}
             onChainRefresh={refresh}
+            contractOwner={owner}
           />
         </>
       ) : owned.length > 0 ? (

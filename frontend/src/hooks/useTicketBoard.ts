@@ -25,6 +25,10 @@ export interface BoardTicket {
   imageUrl?: string;
   /** This ticket's face value — the resale ceiling, set per batch at minting. */
   faceValue?: bigint;
+  /** Per-event cap on primary-sale purchases by any one wallet; 0 = unlimited. */
+  maxPerBuyer?: bigint;
+  /** How many primary-sale tickets the connected wallet has already bought for this event. */
+  primaryBought?: bigint;
 }
 
 const TICKETS_ENDPOINT = 'http://127.0.0.1:8080/tickets';
@@ -134,9 +138,10 @@ export function useTicketBoard() {
     return chainTokenIds.map((id) => byId.get(id) ?? syntheticTicket(id));
   }, [chainTokenIds, tickets]);
 
-  // One batch of reads for the whole board: each token's owner, listing, and
-  // event details (which carry the per-token face value). Keyed on
-  // chainTokenIds so it re-fetches when totalMinted grows.
+  // One batch of reads for the whole board: each token's owner, listing,
+  // event details (which carry the per-token face value), and the tickets
+  // mapping entry (which carries the eventId for primaryBought lookups).
+  // Keyed on chainTokenIds so it re-fetches when totalMinted grows.
   const {
     data: chainData,
     isPending: isChainPending,
@@ -163,19 +168,71 @@ export function useTicketBoard() {
           functionName: 'getTicketEvent',
           args: [BigInt(id)],
         },
+        {
+          address: ticketAddress,
+          abi: ticketAbi,
+          functionName: 'tickets',
+          args: [BigInt(id)],
+        },
       ]),
     ],
     query: { enabled: chainTokenIds.length > 0 },
   });
 
+  const eventIdByToken = useMemo(() => {
+    const out: (bigint | undefined)[] = [];
+    for (let i = 0; i < chainTokenIds.length; i++) {
+      const ticketResult = chainData?.[i * 4 + 3];
+      if (ticketResult?.status === 'success') {
+        // tickets(tokenId) returns (faceValue, isResellable, eventId)
+        const tuple = ticketResult.result as readonly [bigint, boolean, bigint];
+        out.push(tuple[2]);
+      } else {
+        out.push(undefined);
+      }
+    }
+    return out;
+  }, [chainData, chainTokenIds.length]);
+
+  const distinctEventIds = useMemo(() => {
+    const seen = new Set<string>();
+    for (const id of eventIdByToken) {
+      if (id !== undefined) seen.add(id.toString());
+    }
+    return Array.from(seen).map((s) => BigInt(s));
+  }, [eventIdByToken]);
+
+  const { data: primaryBoughtData, refetch: refetchPrimaryBought } = useReadContracts({
+    allowFailure: true,
+    contracts: distinctEventIds.map((eventId) => ({
+      address: ticketAddress,
+      abi: ticketAbi,
+      functionName: 'primaryBought',
+      args: [eventId, address ?? '0x0000000000000000000000000000000000000000'],
+    })),
+    query: { enabled: distinctEventIds.length > 0 && address !== undefined },
+  });
+
+  const primaryBoughtByEvent = useMemo(() => {
+    const out = new Map<string, bigint>();
+    distinctEventIds.forEach((eventId, i) => {
+      const result = primaryBoughtData?.[i];
+      if (result?.status === 'success') {
+        out.set(eventId.toString(), result.result as bigint);
+      }
+    });
+    return out;
+  }, [distinctEventIds, primaryBoughtData]);
+
   const boardTickets = useMemo<BoardTicket[]>(
     () =>
       mergedTickets.map((ticket, index) => {
-        // Three reads per token.
-        const base = index * 3;
+        // Four reads per token.
+        const base = index * 4;
         const ownerResult = chainData?.[base];
         const listingResult = chainData?.[base + 1];
         const eventResult = chainData?.[base + 2];
+        const ticketResult = chainData?.[base + 3];
 
         const listingTuple =
           listingResult?.status === 'success'
@@ -190,11 +247,15 @@ export function useTicketBoard() {
         // The event the organizer named at mint time is the authoritative
         // title and date; the P2P feed's version is only a fallback. The
         // fourth element is this ticket's own face value — per token, since
-        // every batch can be priced differently.
+        // every batch can be priced differently. The fifth is maxPerBuyer.
         const eventTuple =
           eventResult?.status === 'success'
-            ? (eventResult.result as readonly [string, bigint, string, bigint])
+            ? (eventResult.result as readonly [string, bigint, string, bigint, bigint])
             : undefined;
+
+        void ticketResult; // consumed via eventIdByToken memo above
+
+        const eventId = eventIdByToken[index];
 
         return {
           ticket: eventTuple
@@ -213,9 +274,14 @@ export function useTicketBoard() {
           // falls back to generated art.
           imageUrl: eventTuple && eventTuple[2] ? eventTuple[2] : undefined,
           faceValue: eventTuple?.[3],
+          maxPerBuyer: eventTuple?.[4],
+          primaryBought:
+            eventId !== undefined
+              ? primaryBoughtByEvent.get(eventId.toString()) ?? 0n
+              : undefined,
         };
       }),
-    [mergedTickets, chainData, address],
+    [mergedTickets, chainData, address, eventIdByToken, primaryBoughtByEvent],
   );
 
   // Listed tickets first; own unlisted tickets appear only on My Tickets.
@@ -240,7 +306,8 @@ export function useTicketBoard() {
     refetchTotalMinted();
     refetchChain();
     refetchFeed();
-  }, [refetchTotalMinted, refetchChain, refetchFeed]);
+    refetchPrimaryBought();
+  }, [refetchTotalMinted, refetchChain, refetchFeed, refetchPrimaryBought]);
 
   return {
     /** Every minted ticket, unfiltered — for counting across all holders. */

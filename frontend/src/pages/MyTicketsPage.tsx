@@ -9,7 +9,7 @@ import { useTicketBoard } from '../hooks/useTicketBoard';
 
 export default function MyTicketsPage() {
   const { isConnected } = useConnection();
-  const { owned, isPending, isError, error, refresh } = useTicketBoard();
+  const { owned, owner, isPending, isError, error, refresh } = useTicketBoard();
 
   return (
     <Box component='section'>
@@ -30,6 +30,7 @@ export default function MyTicketsPage() {
           entries={owned}
           isConnected={isConnected}
           onChainRefresh={refresh}
+          contractOwner={owner}
         />
       ) : (
         <StatePanel

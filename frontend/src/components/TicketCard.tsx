@@ -3,14 +3,11 @@ import { Box, Button, Card, CardContent, Tooltip, Typography } from '@mui/materi
 import LocationOnOutlinedIcon from '@mui/icons-material/LocationOnOutlined';
 import CalendarTodayOutlinedIcon from '@mui/icons-material/CalendarTodayOutlined';
 import { useState } from 'react';
-import { useConnection } from 'wagmi';
-import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import { formatEther } from 'viem';
 import { ticketAbi, ticketAddress } from '../contracts/ticketNFT';
 import type { BoardTicket } from '../hooks/useTicketBoard';
 import { useTicketWrite } from '../hooks/useTicketWrite';
-import { truncateAddress } from '../lib/format';
-import { watchTicket, WatchAssetUnsupported } from '../lib/watchAsset';
+import { isSameAddress, truncateAddress } from '../lib/format';
 import {
   ctaButtonSx,
   FONT_DISPLAY,
@@ -30,17 +27,31 @@ export default function TicketCard({
   entry,
   isConnected,
   onChainRefresh,
+  contractOwner,
 }: {
   entry: BoardTicket;
   isConnected: boolean;
   /** Re-read on-chain state after a write confirms. */
   onChainRefresh: () => void;
+  /** Contract owner address — used to detect a primary-sale listing. */
+  contractOwner?: string;
 }) {
   // faceValue is per ticket — each event's batch sets its own resale ceiling.
   const { ticket, owner, listing, isOwnedByViewer, imageUrl, faceValue } = entry;
+
+  const maxPerBuyer = entry.maxPerBuyer;
+  const primaryBought = entry.primaryBought;
+
+  // Primary sale = the current ticket holder (owner) is the contract owner (organizer).
+  const isPrimarySale = isSameAddress(owner, contractOwner);
+
+  const hasCap = maxPerBuyer !== undefined && maxPerBuyer > 0n;
+  const capReached =
+    hasCap &&
+    isPrimarySale &&
+    primaryBought !== undefined &&
+    primaryBought >= (maxPerBuyer as bigint);
   const [isListingFormRequested, setListingFormRequested] = useState(false);
-  const [walletNotice, setWalletNotice] = useState<string | null>(null);
-  const { connector } = useConnection();
 
   const write = useTicketWrite(onChainRefresh);
 
@@ -85,24 +96,6 @@ export default function TicketCard({
       ? 'Processing…'
       : null;
 
-  // MetaMask cannot discover NFTs on a local chain, so a freshly minted ticket
-  // stays invisible in the wallet until it is registered by hand. Offer to do
-  // it in one prompt instead.
-  const addToWallet = async () => {
-    if (!connector) return;
-    setWalletNotice(null);
-    try {
-      const added = await watchTicket(connector, ticket.id);
-      setWalletNotice(added ? 'Added to your wallet.' : 'Not added.');
-    } catch (error) {
-      setWalletNotice(
-        error instanceof WatchAssetUnsupported
-          ? error.message
-          : 'Could not add the ticket to your wallet.',
-      );
-    }
-  };
-
   const priceLabel = isChainStateLoaded
     ? `${formatEther(isListed ? listing.price : faceValue)} ETH`
     : null;
@@ -135,6 +128,14 @@ export default function TicketCard({
         {isOwnedByViewer && (
           <Box sx={{ position: 'absolute', top: 12, left: 12 }}>
             <StatusChip tone='violet' label='Yours' />
+          </Box>
+        )}
+        {hasCap && (
+          <Box sx={{ position: 'absolute', bottom: 12, right: 12 }}>
+            <StatusChip
+              tone='orange'
+              label={`Limit ${maxPerBuyer!.toString()} / wallet`}
+            />
           </Box>
         )}
       </Box>
@@ -209,25 +210,6 @@ export default function TicketCard({
 
         {/* Actions sit at the bottom edge however tall the card grows. */}
         <Box sx={{ mt: 'auto', pt: 2 }}>
-          {isOwnedByViewer && (
-            <Box sx={{ mb: 1 }}>
-              <Button
-                fullWidth
-                startIcon={<AccountBalanceWalletOutlinedIcon sx={{ fontSize: 16 }} />}
-                onClick={addToWallet}
-                sx={{ ...ghostButtonSx, justifyContent: 'center' }}
-              >
-                Show in wallet
-              </Button>
-              {walletNotice && (
-                <Typography
-                  sx={{ ...monoLabelSx, color: tokens.outline, mt: 0.5, display: 'block' }}
-                >
-                  {walletNotice}
-                </Typography>
-              )}
-            </Box>
-          )}
           {isOwnedByViewer ? (
             isListingFormOpen && faceValue !== undefined ? (
               <ListingForm
@@ -268,7 +250,7 @@ export default function TicketCard({
               fullWidth
               variant='contained'
               onClick={buy}
-              disabled={!isConnected || !isListed || write.isBusy}
+              disabled={!isConnected || !isListed || write.isBusy || capReached}
               sx={ctaButtonSx(write.isConfirmed && write.action === 'buy', write.isBusy)}
             >
               {busyLabel ??
@@ -278,9 +260,11 @@ export default function TicketCard({
                     ? 'Loading…'
                     : !isListed
                       ? 'Not for sale'
-                      : isConnected
-                        ? 'Buy Ticket'
-                        : 'Connect to buy')}
+                      : capReached
+                        ? 'Limit reached'
+                        : isConnected
+                          ? 'Buy Ticket'
+                          : 'Connect to buy')}
             </Button>
           )}
         </Box>
