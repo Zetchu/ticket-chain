@@ -66,19 +66,24 @@ def _tx_to_ticket(tx: Transaction, status: str) -> dict | None:
     getTicketDetails(id) and resaleTransfer(id) with it, so a transaction
     whose ticket_id is not a token ID has no on-chain counterpart to show
     and is skipped (returns None) rather than rendering a broken card.
+
+    Title and date come from the on-chain event metadata the bridge attaches
+    (event_name/event_date), falling back to the old placeholders for
+    transactions that predate those fields.
     """
     try:
         token_id = int(tx.ticket_id)
     except (TypeError, ValueError):
         return None
 
+    date = tx.event_date if tx.event_date else tx.timestamp
     return {
         "id": token_id,
         "type": status,
         "price": str(tx.price),
-        "title": f"Ticket #{token_id}",
+        "title": tx.event_name or f"Ticket #{token_id}",
         "location": "Local P2P Network",
-        "date": datetime.fromtimestamp(tx.timestamp, tz=timezone.utc).strftime(
+        "date": datetime.fromtimestamp(date, tz=timezone.utc).strftime(
             "%Y-%m-%d %H:%M"
         ),
     }
@@ -107,27 +112,35 @@ def create_app(blockchain: Blockchain) -> FastAPI:
 
     @app.get("/tickets")
     def get_tickets() -> list[dict]:
-        """Return all ticket offerings known to this node.
+        """Return the current state of every ticket known to this node.
 
-        Includes transactions confirmed in mined blocks (type "Confirmed")
-        and pending mempool transactions (type "Pending").
+        One row per token ID: a ticket that was minted, listed, and sold is
+        one entry, not three. The most recent transaction for each token
+        wins — blocks are walked in chain order, and mempool transactions
+        are applied last so a pending sale overrides its mined history.
+
+        ``type`` is the ticket's lifecycle state as recorded by the bridge
+        ("Minted", "Listed", "Sold", "Unlisted"), "Confirmed" for mined
+        transactions that predate lifecycle tracking, or "Pending" for
+        mempool entries not yet mined into a block.
         """
-        tickets: list[dict] = []
+        latest: dict[int, dict] = {}
 
-        # Confirmed transactions from mined blocks (skip genesis, no txs)
+        # Chain order is chronological: later transactions overwrite earlier
+        # ones for the same token. (Genesis has no transactions.)
         for block in blockchain.chain:
             for tx in block.transactions:
-                ticket = _tx_to_ticket(tx, "Confirmed")
+                ticket = _tx_to_ticket(tx, tx.kind or "Confirmed")
                 if ticket is not None:
-                    tickets.append(ticket)
+                    latest[ticket["id"]] = ticket
 
-        # Pending transactions from the mempool
+        # Mempool last, so not-yet-mined activity wins over mined history.
         for tx in blockchain.mempool:
             ticket = _tx_to_ticket(tx, "Pending")
             if ticket is not None:
-                tickets.append(ticket)
+                latest[ticket["id"]] = ticket
 
-        return tickets
+        return list(latest.values())
 
     @app.post("/images")
     async def upload_image(file: UploadFile = File(...)) -> dict:

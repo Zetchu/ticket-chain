@@ -38,8 +38,16 @@ CONTRACT_JSON = (
     / "frontend" / "src" / "contracts" / "TicketNFT.json"
 )
 
-# The on-chain events republished into the P2P feed.
-EVENT_NAMES = ("TicketMinted", "TicketTransferred", "TicketListed", "TicketUnlisted")
+# The on-chain events republished into the P2P feed, and the ticket
+# lifecycle state each one represents (carried as Transaction.kind so the
+# feed can show "Listed"/"Sold" instead of a generic "Confirmed").
+EVENT_KINDS = {
+    "TicketMinted": "Minted",
+    "TicketListed": "Listed",
+    "TicketTransferred": "Sold",
+    "TicketUnlisted": "Unlisted",
+}
+EVENT_NAMES = tuple(EVENT_KINDS)
 
 POLL_INTERVAL = 2.0   # seconds between block-number polls
 RETRY_INTERVAL = 5.0  # seconds between reconnect attempts
@@ -60,6 +68,9 @@ class ContractEventBridge:
         # The bridge's P2P identity: every republished event is signed with
         # this key so peers can validate the transaction signature.
         self._key, self._pubkey = generate_keypair()
+        # getTicketEvent(tokenId) results; a ticket's event never changes, so
+        # each token is asked once per chain (cleared when the chain resets).
+        self._event_cache: dict[int, tuple[str | None, int | None]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -108,6 +119,7 @@ class ContractEventBridge:
 
         # Start from the current tip: history before the bridge came up is
         # replayed on the next deploy anyway (deploy.js mints fresh tokens).
+        self._event_cache.clear()
         last_block = await w3.eth.block_number
         print(
             f"[bridge] watching {info['address']} on {self.rpc_url} "
@@ -119,8 +131,10 @@ class ContractEventBridge:
             current = await w3.eth.block_number
 
             if current < last_block:
-                # The Hardhat node was restarted and the chain reset.
+                # The Hardhat node was restarted and the chain reset: token IDs
+                # start over, so cached event metadata is stale too.
                 print(f"[bridge] chain reset detected (tip {current}) — resyncing")
+                self._event_cache.clear()
                 last_block = current
                 continue
             if current == last_block:
@@ -135,7 +149,7 @@ class ContractEventBridge:
             logs.sort(key=lambda log: (log["blockNumber"], log["logIndex"]))
 
             for log in logs:
-                self._publish(log, face_value)
+                await self._publish(contract, log, face_value)
             if logs:
                 # One P2P block per batch of contract events: mine the mempool
                 # and broadcast it so peers pick the state change up.
@@ -147,14 +161,18 @@ class ContractEventBridge:
     # Event → Transaction
     # ------------------------------------------------------------------
 
-    def _publish(self, log, face_value: int) -> None:
+    async def _publish(self, contract, log, face_value: int) -> None:
         """Republish one contract event as a signed P2P transaction.
 
         ticket_id carries the ERC-721 token ID as a string — api.py parses
-        it back with int() and skips anything non-numeric.
+        it back with int() and skips anything non-numeric. The transaction
+        also carries the ticket's lifecycle state (kind) and the on-chain
+        event name/date, so feed consumers see real metadata instead of
+        placeholders.
         """
         name = log["event"]
         args = log["args"]
+        token_id = int(args["tokenId"])
 
         if name == "TicketMinted":
             price = int(args["faceValue"])
@@ -169,13 +187,38 @@ class ContractEventBridge:
             price = 0
             counterparty = args["seller"]
 
+        event_name, event_date = await self._ticket_event(contract, token_id)
+
         tx = Transaction(
             sender=self._pubkey,
             recipient=counterparty,  # Ethereum address of the affected party
-            ticket_id=str(args["tokenId"]),
+            ticket_id=str(token_id),
             price=price,
             face_value=face_value,
+            kind=EVENT_KINDS[name],
+            event_name=event_name,
+            event_date=event_date,
         )
         tx.sign(self._key)
         self.community.submit_transaction(tx)
-        print(f"[bridge] {name} tokenId={args['tokenId']} → P2P tx {tx.tx_hash()[:8]}…")
+        print(f"[bridge] {name} tokenId={token_id} → P2P tx {tx.tx_hash()[:8]}…")
+
+    async def _ticket_event(
+        self, contract, token_id: int
+    ) -> tuple[str | None, int | None]:
+        """The on-chain event (name, date) a ticket admits to, cached per token.
+
+        Falls back to (None, None) — placeholder metadata in the feed — rather
+        than failing the whole event batch if the read reverts.
+        """
+        if token_id not in self._event_cache:
+            try:
+                # Returns (name, date, imageRef) since the artwork feature;
+                # index instead of unpacking so older 2-tuple ABIs work too.
+                result = await contract.functions.getTicketEvent(token_id).call()
+                name, date = result[0], result[1]
+                self._event_cache[token_id] = (name or None, int(date) or None)
+            except Exception as exc:  # noqa: BLE001 - metadata is best-effort
+                print(f"[bridge] getTicketEvent({token_id}) failed: {exc}")
+                self._event_cache[token_id] = (None, None)
+        return self._event_cache[token_id]
