@@ -354,38 +354,9 @@ Locate the block around line 194 that casts to `readonly [string, bigint, string
             : undefined;
 ```
 
-- [ ] **Step 3: Add `primaryBought` reads to the contract batch**
+- [ ] **Step 3: Add `tickets(tokenId)` to the per-token batch**
 
-The existing `useReadContracts` block issues 3 reads per token (`ownerOf`, `listings`, `getTicketEvent`). We need one additional read per token: `primaryBought(eventId, viewer)`. Since we don't know `eventId` until `getTicketEvent` returns, and we can't chain reads inside a single batch, the pragmatic approach is a **second `useReadContracts`** keyed on the eventIds we already discovered.
-
-Add this block just after the existing `useReadContracts` (before `boardTickets` is built):
-
-```ts
-  // Second-pass read: for each (eventId, viewer) pair present on the board,
-  // read primaryBought so the cap can be gated preemptively. One read per
-  // distinct eventId (all tokens in a batch share the same event).
-  const distinctEventIds = useMemo(() => {
-    if (!chainData || !address) return [] as bigint[];
-    const seen = new Set<string>();
-    for (let i = 0; i < chainTokenIds.length; i++) {
-      const eventResult = chainData[i * 3 + 2];
-      if (eventResult?.status !== 'success') continue;
-      const tuple = eventResult.result as readonly [string, bigint, string, bigint, bigint];
-      // eventId is not returned by getTicketEvent — we derive it via tickets().
-      // Simpler: read tickets(tokenId).eventId in a follow-up. For now, we key
-      // on tokenId and read primaryBought per-token; the mapping accepts the
-      // eventId we fetch below.
-      seen.add(String(i));
-    }
-    return Array.from(seen).map((s) => BigInt(s));
-  }, [chainData, address, chainTokenIds]);
-```
-
-Wait — `getTicketEvent` doesn't return `eventId`, only its details. To keep the batch simple and avoid another indirection, extend the *first* `useReadContracts` to also call `tickets(tokenId)` (which returns `(faceValue, isResellable, eventId)`) so we know each token's eventId. Then a second batch reads `primaryBought(eventId, viewer)` per distinct eventId.
-
-Replace the plan for step 3 with the concrete edits below.
-
-- [ ] **Step 3 (revised): Add `tickets(tokenId)` to the per-token batch**
+The existing `useReadContracts` block issues 3 reads per token (`ownerOf`, `listings`, `getTicketEvent`). `getTicketEvent` doesn't return the `eventId`, so we add a fourth read — `tickets(tokenId)` returns `(faceValue, isResellable, eventId)` — and use it in step 4 to key the `primaryBought` lookups.
 
 Inside the existing `useReadContracts` call in `useTicketBoard.ts`, add a fourth read per token:
 
