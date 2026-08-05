@@ -130,9 +130,10 @@ cd ticket-chain
 ./start_dev.sh
 ```
 
-That starts the Hardhat chain, deploys the contract, exports its ABI and address
-to the frontend, starts the P2P node with its bridge and HTTP API, and starts
-Vite. Ctrl+C stops everything. The first run also creates `network/.venv` and
+That stops anything left over from a previous run, then starts the Hardhat
+chain, deploys the contract, exports its ABI and address to the frontend, starts
+the P2P node with its bridge and HTTP API, and starts Vite. Ctrl+C stops
+everything, and `./stop_dev.sh` stops a stack that outlived its terminal. The first run also creates `network/.venv` and
 installs the Python dependencies; later runs reinstall only when
 `requirements.txt` changes.
 

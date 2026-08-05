@@ -104,6 +104,9 @@ ABI + address exported to .../frontend/src/contracts/TicketNFT.json
 
 **Ctrl+C stops everything.** Backend output goes to `hardhat.log` and
 `network.log` in the project root — check those first if something looks wrong.
+If a service is ever left behind (a terminal closed without Ctrl+C, say), run
+`./stop_dev.sh` — and starting the stack again always clears the old one first,
+so `./start_dev.sh` is safe to re-run at any time.
 
 Open <http://localhost:5173>. The ticket board starts empty — connect as account #0
 (the organizer) and use the **Organizer** page to mint your first tickets.
@@ -242,9 +245,11 @@ MetaMask → Settings → Advanced → **Clear activity tab data**.
 Click **Switch network** in the banner, or select *Hardhat Local* manually.
 
 **`Port 8545 is already in use`**
-A previous run is still alive. Kill it:
+A previous run is still alive — usually a terminal that was closed without
+Ctrl+C. `./start_dev.sh` clears this automatically before it starts, so just run
+it again. To stop everything without starting it back up:
 ```bash
-pkill -f "hardhat node"; pkill -f vite; pkill -f "main.py"
+./stop_dev.sh
 ```
 
 **Tickets vanished after a restart**
