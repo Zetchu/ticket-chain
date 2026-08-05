@@ -10,12 +10,10 @@ const GRID_SIZE = { xs: 12, sm: 6, md: 4 } as const;
 export default function TicketGrid({
   entries,
   isConnected,
-  faceValue,
   onChainRefresh,
 }: {
   entries: BoardTicket[];
   isConnected: boolean;
-  faceValue?: bigint;
   onChainRefresh: () => void;
 }) {
   return (
@@ -25,7 +23,6 @@ export default function TicketGrid({
           <TicketCard
             entry={entry}
             isConnected={isConnected}
-            faceValue={faceValue}
             onChainRefresh={onChainRefresh}
           />
         </Grid>

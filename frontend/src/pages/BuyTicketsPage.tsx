@@ -9,7 +9,7 @@ import { useTicketBoard } from '../hooks/useTicketBoard';
 
 export default function BuyTicketsPage() {
   const { isConnected } = useConnection();
-  const { market, owned, faceValue, isPending, isError, error, refresh } = useTicketBoard();
+  const { market, owned, isPending, isError, error, refresh } = useTicketBoard();
 
   const listedCount = market.filter((entry) => entry.listing?.active).length;
 
@@ -42,7 +42,6 @@ export default function BuyTicketsPage() {
           <TicketGrid
             entries={market}
             isConnected={isConnected}
-            faceValue={faceValue}
             onChainRefresh={refresh}
           />
         </>

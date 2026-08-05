@@ -23,6 +23,8 @@ export interface BoardTicket {
   isOwnedByViewer: boolean;
   /** Organizer artwork for this ticket's event; absent when none was uploaded. */
   imageUrl?: string;
+  /** This ticket's face value — the resale ceiling, set per batch at minting. */
+  faceValue?: bigint;
 }
 
 const TICKETS_ENDPOINT = 'http://127.0.0.1:8080/tickets';
@@ -132,8 +134,9 @@ export function useTicketBoard() {
     return chainTokenIds.map((id) => byId.get(id) ?? syntheticTicket(id));
   }, [chainTokenIds, tickets]);
 
-  // One batch of reads for the whole board: face value plus each token's owner
-  // and listing. Keyed on chainTokenIds so it re-fetches when totalMinted grows.
+  // One batch of reads for the whole board: each token's owner, listing, and
+  // event details (which carry the per-token face value). Keyed on
+  // chainTokenIds so it re-fetches when totalMinted grows.
   const {
     data: chainData,
     isPending: isChainPending,
@@ -141,7 +144,6 @@ export function useTicketBoard() {
   } = useReadContracts({
     allowFailure: true,
     contracts: [
-      { address: ticketAddress, abi: ticketAbi, functionName: 'FACE_VALUE' },
       ...chainTokenIds.flatMap((id) => [
         {
           address: ticketAddress,
@@ -166,16 +168,11 @@ export function useTicketBoard() {
     query: { enabled: chainTokenIds.length > 0 },
   });
 
-  const faceValue =
-    chainData?.[0]?.status === 'success'
-      ? (chainData[0].result as bigint)
-      : undefined;
-
   const boardTickets = useMemo<BoardTicket[]>(
     () =>
       mergedTickets.map((ticket, index) => {
-        // Three reads per token, offset by one for FACE_VALUE at the head.
-        const base = 1 + index * 3;
+        // Three reads per token.
+        const base = index * 3;
         const ownerResult = chainData?.[base];
         const listingResult = chainData?.[base + 1];
         const eventResult = chainData?.[base + 2];
@@ -191,10 +188,12 @@ export function useTicketBoard() {
             : undefined;
 
         // The event the organizer named at mint time is the authoritative
-        // title and date; the P2P feed's version is only a fallback.
+        // title and date; the P2P feed's version is only a fallback. The
+        // fourth element is this ticket's own face value — per token, since
+        // every batch can be priced differently.
         const eventTuple =
           eventResult?.status === 'success'
-            ? (eventResult.result as readonly [string, bigint, string])
+            ? (eventResult.result as readonly [string, bigint, string, bigint])
             : undefined;
 
         return {
@@ -213,6 +212,7 @@ export function useTicketBoard() {
           // Empty string means the organizer uploaded nothing, so the card
           // falls back to generated art.
           imageUrl: eventTuple && eventTuple[2] ? eventTuple[2] : undefined,
+          faceValue: eventTuple?.[3],
         };
       }),
     [mergedTickets, chainData, address],
@@ -249,7 +249,6 @@ export function useTicketBoard() {
     market,
     /** Tickets held by the connected wallet — the My Tickets page. */
     owned,
-    faceValue,
     /** Total tickets minted so far (next token ID). */
     totalMinted,
     /** Contract owner address — use to detect the organizer wallet. */

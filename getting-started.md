@@ -166,12 +166,16 @@ Back in the app, click **Connect Wallet** and approve the connection.
 ## 6. Mint tickets and buy one
 
 1. Connect as **Account #0**. The **Organizer** page appears in the nav.
-2. Go to **Organizer**, fill in an event name and date, set a quantity (e.g. 3),
-   and optionally pick a poster image. Click **Mint & List** and confirm in
+2. Go to **Organizer**, fill in an event name and date, set a quantity (e.g. 3)
+   and a face value (keep the pre-filled 0.05 ETH for this walkthrough — it's
+   permanent per batch: it caps every future resale of these tickets, and each
+   new event can be priced differently), and optionally pick a poster image.
+   Click **Mint & List** and confirm in
    MetaMask. The tickets appear on the **Buy Tickets** page instantly, showing
    your image — or artwork generated from the token ID if you skipped it.
 3. Switch MetaMask to **Account #1**.
-4. On **Buy Tickets**, pick a card — listed at 0.05 ETH by account #0.
+4. On **Buy Tickets**, pick a card — listed by account #0 at the 0.05 ETH face
+   value you entered.
 5. Click **Buy Ticket** and confirm. The button walks through *Confirm in wallet* →
    *Processing* → *Purchased*, and the card's owner address changes to yours.
 
