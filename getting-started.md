@@ -183,6 +183,34 @@ Open **My Tickets** in the nav and it's there.
 
 ---
 
+## 6b. Seeing your ticket in MetaMask
+
+Your ticket is an NFT and MetaMask can display it — but not on its own.
+**NFT auto-detection only works on the networks MetaMask indexes** (Ethereum,
+Base, Linea and a few others), never on a local chain. On Hardhat, every token
+has to be registered with the wallet by hand.
+
+Two one-time settings first:
+
+1. Settings → **Security & privacy** → turn on **Display NFT media**. Without
+   it the ticket shows as a blank tile even once added.
+2. Make sure MetaMask is on the **Hardhat Local** network.
+
+Then click **Show in wallet** on any ticket you own. MetaMask prompts once, and
+the ticket appears under the NFTs tab with its artwork, event name and face
+value.
+
+If your wallet refuses — the feature is extension-only and still marked
+experimental — add it by hand instead: NFTs → **Import NFT** → paste the
+contract address from `frontend/src/contracts/TicketNFT.json` and the token ID.
+
+> **Every token is separate.** Adding ticket #0 does not reveal #1, and a second
+> minted batch will not appear until you add its tokens too. That is MetaMask's
+> behaviour on a local chain, not a fault in the app — the tickets are already
+> yours on-chain, which is why the web app lists them all either way.
+
+---
+
 ## 7. Resell it
 
 This is the part the whole project exists for.
@@ -241,9 +269,20 @@ libsodium — see step 2.
 Install libsodium (step 2), then delete `network/.venv` and re-run
 `./start_dev.sh` so the script re-links it.
 
-**A transaction hangs, or MetaMask reports a nonce error**
-You restarted the chain while MetaMask still remembered the old one. Fix:
-MetaMask → Settings → Advanced → **Clear activity tab data**.
+**The first transaction after a restart fails**
+The most common thing you will hit. `./start_dev.sh` deploys a brand new chain,
+so account #0 is back to a nonce of 1 — but MetaMask still remembers the nonce
+it reached on the previous chain and submits with that. Hardhat rejects it
+outright:
+
+```
+Nonce too high. Expected nonce to be 4 but got 16.
+Note that transactions can't be queued when automining.
+```
+
+Fix: MetaMask → Settings → Advanced → **Clear activity tab data**, then retry.
+Do this after every restart and it stops happening. Nothing is wrong with the
+contract — a rejected transaction never reaches it.
 
 **The app says you're on the wrong network**
 Click **Switch network** in the banner, or select *Hardhat Local* manually.
