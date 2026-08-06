@@ -4,8 +4,11 @@ This document is the rehearsal/run script for the two Week 2 live demos
 referenced in the [README](../README.md#5-live-demo-scenarios):
 
 - **☀️ Sunny Day** — a regular, face-value ticket transfer via the UI.
-- **🌧️ Rainy Day** — a scalper attempts to buy above face value directly
-  against the contract, and the anti-scalping check reverts the transaction.
+- **🌧️ Rainy Day** — a scalper attempts to sell above face value, in both of
+  the ways that are possible, and the contract refuses each one.
+- **🌧️ Rainy Day (limits)** — a bulk buyer hits the per-wallet cap on the
+  primary sale, and a ticket for an event that has already started can no
+  longer be traded.
 - **🔗 Two-Node Propagation** — a second P2P node joins (or rejoins) the
   network and catches up on the chain it missed via chain sync, instead of
   getting stuck out of sync forever.
@@ -183,6 +186,52 @@ Ticket #0 listing unchanged: YES (0.05 ETH)
   MetaMask), you can also open `npx hardhat console --network localhost`
   and call `resaleTransfer` with a hand-typed overpriced `value` live — the
   script above is just the scripted/repeatable form of the same call.
+
+## 2b. 🌧️ Rainy Day — The Bulk Buyer and the Stale Ticket
+
+**Story:** two failures that have nothing to do with price. A bot tries to
+corner the primary sale, and someone tries to trade a ticket for a show that
+has already begun. Both are refused on-chain.
+
+### Steps
+
+```bash
+cd contracts
+npx hardhat run scripts/demo-limits.js --network localhost
+```
+
+### Actual output (captured while verifying this doc)
+
+```
+Contract: 0x5FbDB2315678afecb367f032d93F642f64180aa3
+
+[1] Organizer mints 3 tickets with a limit of 1 per wallet...
+    buyer takes #13: ok
+    same wallet tries #14: REVERTED — Primary purchase limit reached for this event
+    a different wallet takes #14: ok — the cap is per address
+
+[2] Organizer mints a ticket for an event that then starts...
+    (chain time advanced past the event start)
+    buying #16:  REVERTED — Event has already started
+    listing #16: REVERTED — Event has already started
+```
+
+### What to point out live
+
+- **The cap is per address, and only on the primary sale.** The third line is
+  the important one: a different wallet still gets its allowance, and the capped
+  wallet can still buy the same ticket later *on resale* from another attendee.
+  Capping the secondary market would punish the people the price ceiling exists
+  to protect — bulk buying at the source is where scalping actually starts.
+- **`maxPerBuyer` is per event**, set at mint time, and `0` means no limit — so
+  an organizer who does not care about bots does not have to think about it.
+- **Expiry uses `block.timestamp`, not the browser clock.** Step 2 advances
+  chain time with `evm_increaseTime`, which is how the test suite reaches the
+  same branch. The UI greys expired tickets out from its own ticking clock, but
+  the contract is what actually refuses.
+- Worth saying out loud: this is the same `require`-and-revert pattern as the
+  scalping demo. Three different rules, one enforcement mechanism, and none of
+  them can be bypassed by using a different client.
 
 ## 3. 🔗 Two-Node Propagation — Chain Sync
 

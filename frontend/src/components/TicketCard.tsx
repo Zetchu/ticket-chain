@@ -1,13 +1,26 @@
 // src/components/TicketCard.tsx
-import { Box, Button, Card, CardContent, Tooltip, Typography } from '@mui/material';
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  IconButton,
+  Snackbar,
+  Tooltip,
+  Typography,
+} from '@mui/material';
 import LocationOnOutlinedIcon from '@mui/icons-material/LocationOnOutlined';
 import CalendarTodayOutlinedIcon from '@mui/icons-material/CalendarTodayOutlined';
+import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import { useState } from 'react';
+import { useConnection } from 'wagmi';
 import { formatEther } from 'viem';
 import { ticketAbi, ticketAddress } from '../contracts/ticketNFT';
 import type { BoardTicket } from '../hooks/useTicketBoard';
+import { useNowSeconds } from '../hooks/useNowSeconds';
 import { useTicketWrite } from '../hooks/useTicketWrite';
 import { isSameAddress, truncateAddress } from '../lib/format';
+import { watchTicket, WatchAssetUnsupported } from '../lib/watchAsset';
 import {
   ctaButtonSx,
   FONT_DISPLAY,
@@ -39,6 +52,12 @@ export default function TicketCard({
   // faceValue is per ticket — each event's batch sets its own resale ceiling.
   const { ticket, owner, listing, isOwnedByViewer, imageUrl, faceValue } = entry;
 
+  const { connector } = useConnection();
+  const [walletNotice, setWalletNotice] = useState<string | null>(null);
+  // A ticking clock, so a ticket that expires while the page is open stops
+  // offering itself for sale without waiting for another render.
+  const nowSeconds = useNowSeconds();
+
   const maxPerBuyer = entry.maxPerBuyer;
   const primaryBought = entry.primaryBought;
 
@@ -59,7 +78,7 @@ export default function TicketCard({
   const isExpired =
     eventDateSeconds !== undefined &&
     eventDateSeconds > 0n &&
-    BigInt(Math.floor(Date.now() / 1000)) >= eventDateSeconds;
+    BigInt(nowSeconds) >= eventDateSeconds;
 
   const [isListingFormRequested, setListingFormRequested] = useState(false);
 
@@ -106,6 +125,23 @@ export default function TicketCard({
       ? 'Processing…'
       : null;
 
+  // MetaMask cannot discover NFTs on a local chain: a minted ticket stays
+  // invisible in the wallet until it is registered token by token. This does
+  // that in one prompt instead of a manual Import NFT dialog.
+  const showInWallet = async () => {
+    if (!connector) return;
+    try {
+      const added = await watchTicket(connector, ticket.id);
+      if (added) setWalletNotice('Ticket added to your wallet.');
+    } catch (error) {
+      setWalletNotice(
+        error instanceof WatchAssetUnsupported
+          ? error.message
+          : 'Could not add the ticket to your wallet.',
+      );
+    }
+  };
+
   const priceLabel = isChainStateLoaded
     ? `${formatEther(isListed ? listing.price : faceValue)} ETH`
     : null;
@@ -139,6 +175,30 @@ export default function TicketCard({
           <Box sx={{ position: 'absolute', top: 12, left: 12 }}>
             <StatusChip tone='violet' label='Yours' />
           </Box>
+        )}
+        {isOwnedByViewer && (
+          <Tooltip title='Show this ticket in your wallet' placement='top'>
+            <IconButton
+              size='small'
+              onClick={showInWallet}
+              aria-label='Show this ticket in your wallet'
+              sx={{
+                position: 'absolute',
+                bottom: 12,
+                left: 12,
+                color: tokens.violetBright,
+                bgcolor: 'rgba(11, 11, 15, 0.6)',
+                border: '1px solid rgba(153, 69, 255, 0.4)',
+                backdropFilter: 'blur(8px)',
+                '&:hover': {
+                  bgcolor: 'rgba(153, 69, 255, 0.2)',
+                  borderColor: tokens.violet,
+                },
+              }}
+            >
+              <AccountBalanceWalletOutlinedIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </Tooltip>
         )}
         {hasCap && (
           <Box sx={{ position: 'absolute', bottom: 12, right: 12 }}>
@@ -285,6 +345,14 @@ export default function TicketCard({
           )}
         </Box>
       </CardContent>
+
+      <Snackbar
+        open={walletNotice !== null}
+        autoHideDuration={6000}
+        onClose={() => setWalletNotice(null)}
+        message={walletNotice}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      />
 
       <TransactionSnackbar
         open={write.isFeedbackOpen}
