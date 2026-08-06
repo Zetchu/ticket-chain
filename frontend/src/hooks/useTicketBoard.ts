@@ -29,6 +29,8 @@ export interface BoardTicket {
   maxPerBuyer?: bigint;
   /** How many primary-sale tickets the connected wallet has already bought for this event. */
   primaryBought?: bigint;
+  /** Event start time as Unix seconds; 0n for event 0 (no date), undefined while pending. */
+  eventDateSeconds?: bigint;
 }
 
 const TICKETS_ENDPOINT = 'http://127.0.0.1:8080/tickets';
@@ -275,6 +277,7 @@ export function useTicketBoard() {
           imageUrl: eventTuple && eventTuple[2] ? eventTuple[2] : undefined,
           faceValue: eventTuple?.[3],
           maxPerBuyer: eventTuple?.[4],
+          eventDateSeconds: eventTuple?.[1],
           primaryBought:
             eventId !== undefined
               ? primaryBoughtByEvent.get(eventId.toString()) ?? 0n
