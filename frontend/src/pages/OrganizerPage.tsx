@@ -77,7 +77,7 @@ export default function OrganizerPage() {
 
   const canMint =
     eventName.trim().length > 0 &&
-    eventDateSeconds > 0 &&
+    eventDateSeconds > Math.floor(Date.now() / 1000) &&
     quantity > 0 &&
     priceWei !== undefined &&
     !isBusy &&
@@ -228,6 +228,9 @@ export default function OrganizerPage() {
               required
               value={eventDate}
               onChange={(e) => setEventDate(e.target.value)}
+              slotProps={{
+                htmlInput: { min: new Date().toISOString().slice(0, 16) },
+              }}
               sx={{ mb: 2.5 }}
             />
 
