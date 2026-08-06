@@ -166,13 +166,19 @@ Back in the app, click **Connect Wallet** and approve the connection.
 ## 6. Mint tickets and buy one
 
 1. Connect as **Account #0**. The **Organizer** page appears in the nav.
-2. Go to **Organizer**, fill in an event name and date, set a quantity (e.g. 3)
-   and a face value (keep the pre-filled 0.05 ETH for this walkthrough — it's
-   permanent per batch: it caps every future resale of these tickets, and each
-   new event can be priced differently), and optionally pick a poster image.
-   Click **Mint & List** and confirm in
-   MetaMask. The tickets appear on the **Buy Tickets** page instantly, showing
-   your image — or artwork generated from the token ID if you skipped it.
+2. Go to **Organizer** and fill in the batch:
+   - **Event name** and a **future date** — the form refuses a date in the past,
+     because a ticket cannot be traded once its event has started.
+   - **Face value** — keep the pre-filled 0.05 ETH for this walkthrough. It is
+     permanent for the batch: it caps every future resale of these tickets, and
+     each new event can be priced differently.
+   - **Quantity** (e.g. 3), an optional **limit per wallet** (0 for no limit —
+     a limit applies only to buying from you, never to resale between
+     attendees), and optionally a **poster image**.
+
+   Click **Mint & List** and confirm in MetaMask. The tickets appear on the
+   **Buy Tickets** page instantly, showing your image — or artwork generated
+   from the token ID if you skipped it.
 3. Switch MetaMask to **Account #1**.
 4. On **Buy Tickets**, pick a card — listed by account #0 at the 0.05 ETH face
    value you entered.
@@ -196,11 +202,11 @@ Two one-time settings first:
    it the ticket shows as a blank tile even once added.
 2. Make sure MetaMask is on the **Hardhat Local** network.
 
-Then click **Show in wallet** on any ticket you own. MetaMask prompts once, and
-the ticket appears under the NFTs tab with its artwork, event name and face
-value.
+Then click the small **wallet icon** in the corner of any ticket you own — it
+only appears on tickets you hold. MetaMask prompts once, and the ticket shows up
+under the NFTs tab with its artwork, event name and face value.
 
-If your wallet refuses — the feature is extension-only and still marked
+If nothing happens — the feature is extension-only and still marked
 experimental — add it by hand instead: NFTs → **Import NFT** → paste the
 contract address from `frontend/src/contracts/TicketNFT.json` and the token ID.
 

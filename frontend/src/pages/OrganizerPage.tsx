@@ -12,6 +12,7 @@ import { parseEther } from 'viem';
 import PageHeader from '../components/PageHeader';
 import TransactionSnackbar from '../components/TransactionSnackbar';
 import { useTicketBoard } from '../hooks/useTicketBoard';
+import { useNowSeconds } from '../hooks/useNowSeconds';
 import { useTicketWrite } from '../hooks/useTicketWrite';
 import { ticketAddress, ticketAbi } from '../contracts/ticketNFT';
 import { isSameAddress, truncateAddress } from '../lib/format';
@@ -37,6 +38,9 @@ export default function OrganizerPage() {
   const [maxPerBuyer, setMaxPerBuyer] = useState(0);
 
   const { all, owned, totalMinted, owner, isPending, refresh } = useTicketBoard();
+
+  // The mint form refuses a date in the past; keep that comparison reactive.
+  const nowSeconds = useNowSeconds();
 
   const { action, submit, isBusy, isConfirmed, error, hash, isFeedbackOpen, closeFeedback } =
     useTicketWrite(refresh);
@@ -77,7 +81,7 @@ export default function OrganizerPage() {
 
   const canMint =
     eventName.trim().length > 0 &&
-    eventDateSeconds > Math.floor(Date.now() / 1000) &&
+    eventDateSeconds > nowSeconds &&
     quantity > 0 &&
     priceWei !== undefined &&
     !isBusy &&

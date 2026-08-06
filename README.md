@@ -213,6 +213,24 @@ exactly one transfer and is unset inside `_update` before `onERC721Received`
 fires, so a malicious buyer contract cannot re-enter from its callback and move
 the ticket on while the guard is still open.
 
+**The organizer sets the price, and it becomes permanent.** Each batch carries
+its own face value, so a festival pass and a basement gig are priced
+differently — but that value is also the resale ceiling for the life of the
+ticket, and there is deliberately no function to change it later. A ceiling an
+organizer could raise afterwards would not be a ceiling.
+
+**The purchase cap applies to the primary sale only.** An organizer can limit
+how many tickets one address may buy *from them*; the same address can still
+buy any number on resale. Capping the secondary market would punish the people
+the ceiling exists to protect, while doing nothing about bulk buying at the
+source, which is where scalping actually starts.
+
+**A ticket stops trading when its event starts.** `listForSale` and
+`resaleTransfer` both refuse once `block.timestamp` passes the event date. The
+frontend greys those tickets out from a ticking clock rather than a value read
+during render, so a ticket that expires while the page is open stops offering
+itself without waiting for the user to click something.
+
 **Event details are stored once per event, not per ticket.** Tickets reference
 an event ID; a 500-seat show stores its name and poster reference once instead
 of 500 times.
@@ -293,7 +311,8 @@ We would rather state these than have them found.
   without an upload carry their SVG inline and render anywhere.
 - **Nothing persists across restarts.** Both chains are in-memory or in
   Hardhat's ephemeral state; `./start_dev.sh` starts from an empty ledger.
-- **One event's tickets share one face value**, chosen by the organizer at
+- **A batch is priced once.** Every ticket in a `mintAndList` call shares one
+  face value, chosen by the organizer at
   mint time. It is permanent by design: the batch's resale ceiling can never
   be raised or lowered afterwards, though each new event sets its own price.
   (`mintTicket`, the eventless escape hatch, still uses the 0.05 ETH
@@ -312,12 +331,12 @@ second node can serve it; persist the P2P chain to disk; per-event pricing.
 ## 9. Testing coverage
 
 ```bash
-cd contracts && npx hardhat test                              # 61 tests
-cd network   && .venv/bin/python -m pytest test_blockchain.py # 62 tests
+cd contracts && npx hardhat test                              # 78 tests
+cd network   && .venv/bin/python -m pytest test_blockchain.py # 68 tests
 cd network   && .venv/bin/python test_two_nodes.py            # live two-node sync
 ```
 
-**Contracts — 61 tests.** Minting and organizer-only access control; the event
+**Contracts — 78 tests.** Minting and organizer-only access control; the event
 registry (details stored per batch, separate batches on separate events,
 metadata surviving a resale); listing and cancellation, including refusal above
 face value, from non-owners, and on locked tickets; purchase, covering exact
@@ -328,9 +347,12 @@ ticket, and repeat resale; a mock contract that rejects ETH, to reach the
 blocked; and token metadata — that `tokenURI` decodes to parseable JSON, points
 at uploaded artwork when there is any, falls back to generated SVG when there is
 not, and escapes an event name containing quotes and angle brackets rather than
-emitting a document no wallet can read.
+emitting a document no wallet can read; per-event pricing, including rejection
+of a zero face value and the ceiling applying per ticket rather than globally;
+the per-address primary-sale cap, including that resale is exempt from it; and
+the event-expiry guard on both listing and purchase.
 
-**Blockchain core — 62 tests.** Signature verification and tamper rejection; the
+**Blockchain core — 68 tests.** Signature verification and tamper rejection; the
 price-ceiling rule; Merkle roots for even and odd leaf counts plus inclusion
 proofs; proof-of-work mining and verification; whole-chain validation against
 tampered transactions, broken links and forged proofs; the per-message search
