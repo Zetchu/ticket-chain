@@ -15,6 +15,10 @@ export function isSameAddress(a?: string, b?: string): boolean {
 const REVERT_MESSAGES: Record<string, string> = {
   'Primary purchase limit reached for this event':
     "You've hit this event's per-wallet purchase limit.",
+  'Event has already started':
+    'This event has already started — resale is closed.',
+  'Event date must be in the future':
+    'Event date must be in the future.',
 };
 
 /**

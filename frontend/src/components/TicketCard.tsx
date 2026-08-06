@@ -51,6 +51,16 @@ export default function TicketCard({
     isPrimarySale &&
     primaryBought !== undefined &&
     primaryBought >= (maxPerBuyer as bigint);
+
+  const eventDateSeconds = entry.eventDateSeconds;
+  // Frontend uses wall-clock time; the contract uses block.timestamp. These
+  // can drift by a block time (~2s on hardhat) so the chip may flip a few
+  // seconds early or late. The contract is the authoritative guard.
+  const isExpired =
+    eventDateSeconds !== undefined &&
+    eventDateSeconds > 0n &&
+    BigInt(Math.floor(Date.now() / 1000)) >= eventDateSeconds;
+
   const [isListingFormRequested, setListingFormRequested] = useState(false);
 
   const write = useTicketWrite(onChainRefresh);
@@ -121,8 +131,8 @@ export default function TicketCard({
         <TicketArtwork tokenId={ticket.id} imageUrl={imageUrl} />
         <Box sx={{ position: 'absolute', top: 12, right: 12 }}>
           <StatusChip
-            tone={isListed ? 'cyan' : 'neutral'}
-            label={isListed ? 'Listed' : 'Not listed'}
+            tone={isExpired ? 'neutral' : isListed ? 'cyan' : 'neutral'}
+            label={isExpired ? 'Expired' : isListed ? 'Listed' : 'Not listed'}
           />
         </Box>
         {isOwnedByViewer && (
@@ -211,7 +221,11 @@ export default function TicketCard({
         {/* Actions sit at the bottom edge however tall the card grows. */}
         <Box sx={{ mt: 'auto', pt: 2 }}>
           {isOwnedByViewer ? (
-            isListingFormOpen && faceValue !== undefined ? (
+            isExpired ? (
+              <Button fullWidth disabled sx={ctaButtonSx(false, true)}>
+                Event started
+              </Button>
+            ) : isListingFormOpen && faceValue !== undefined ? (
               <ListingForm
                 faceValue={faceValue}
                 initialPrice={isListed ? listing.price : undefined}
@@ -250,7 +264,7 @@ export default function TicketCard({
               fullWidth
               variant='contained'
               onClick={buy}
-              disabled={!isConnected || !isListed || write.isBusy || capReached}
+              disabled={!isConnected || !isListed || write.isBusy || capReached || isExpired}
               sx={ctaButtonSx(write.isConfirmed && write.action === 'buy', write.isBusy)}
             >
               {busyLabel ??
@@ -260,11 +274,13 @@ export default function TicketCard({
                     ? 'Loading…'
                     : !isListed
                       ? 'Not for sale'
-                      : capReached
-                        ? 'Limit reached'
-                        : isConnected
-                          ? 'Buy Ticket'
-                          : 'Connect to buy')}
+                      : isExpired
+                        ? 'Event started'
+                        : capReached
+                          ? 'Limit reached'
+                          : isConnected
+                            ? 'Buy Ticket'
+                            : 'Connect to buy')}
             </Button>
           )}
         </Box>

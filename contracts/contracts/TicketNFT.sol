@@ -137,6 +137,7 @@ contract TicketNFT is ERC721, Ownable {
         require(quantity > 0, "Quantity must be at least 1");
         require(bytes(name).length > 0, "Event name is required");
         require(date > 0, "Event date is required");
+        require(date > block.timestamp, "Event date must be in the future");
         require(faceValue > 0, "Face value is required");
 
         eventId = _nextEventId++;
@@ -354,6 +355,15 @@ contract TicketNFT is ERC721, Ownable {
             "Scalping detected: Price exceeds face value"
         );
 
+        // Refuse listings for events that have started. Event 0 (the
+        // mintTicket() fallback) has date == 0 and no meaningful start,
+        // so it short-circuits and stays listable forever.
+        uint256 eventDate = eventDetails[tickets[tokenId].eventId].date;
+        require(
+            eventDate == 0 || block.timestamp < eventDate,
+            "Event has already started"
+        );
+
         listings[tokenId] = Listing({price: price, active: true});
         emit TicketListed(tokenId, msg.sender, price);
     }
@@ -381,6 +391,15 @@ contract TicketNFT is ERC721, Ownable {
         require(tickets[tokenId].isResellable, "Ticket is not resellable");
         require(msg.sender != seller, "Cannot buy your own ticket");
         require(msg.value == listing.price, "Payment must equal the listed price");
+
+        // Refuse purchases for events that have started. Same event 0
+        // short-circuit as listForSale — the mintTicket() fallback has
+        // no event date to expire against.
+        uint256 eventDate = eventDetails[tickets[tokenId].eventId].date;
+        require(
+            eventDate == 0 || block.timestamp < eventDate,
+            "Event has already started"
+        );
 
         // Primary sale = seller is the organizer. Secondary sales stay
         // uncapped: the face-value ceiling already prevents scalping there,
