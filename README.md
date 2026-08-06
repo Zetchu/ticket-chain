@@ -13,6 +13,7 @@ organizer, reseller, or platform operator can override.
 | **Demo runbook** | [`docs/demo-scenarios.md`](docs/demo-scenarios.md) |
 | **How we built it** | [`docs/development-process.md`](docs/development-process.md) |
 | **How it works, in depth** | [`docs/technical-walkthrough.md`](docs/technical-walkthrough.md) |
+| **Presentation & defence plan** | [`docs/presentation-plan.md`](docs/presentation-plan.md) |
 | **Hosted page** | `ticket-chain-ten.vercel.app` — a landing page only. The chain and the P2P node run on *your* machine, so the working demo is local by design. |
 
 ---
